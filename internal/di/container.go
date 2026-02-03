@@ -91,12 +91,6 @@ func (c *Container) registerRepositories() error {
 	if err := c.Provide(repository.NewTagRepository); err != nil {
 		return err
 	}
-	if err := c.Provide(repository.NewPageRepository); err != nil {
-		return err
-	}
-	if err := c.Provide(repository.NewWorkspaceRepository); err != nil {
-		return err
-	}
 	if err := c.Provide(repository.NewCommentRepository); err != nil {
 		return err
 	}
@@ -125,12 +119,6 @@ func (c *Container) registerServices() error {
 	if err := c.Provide(service.NewTagService); err != nil {
 		return err
 	}
-	if err := c.Provide(service.NewPageService); err != nil {
-		return err
-	}
-	if err := c.Provide(service.NewWorkspaceService); err != nil {
-		return err
-	}
 	if err := c.Provide(service.NewCommentService); err != nil {
 		return err
 	}
@@ -157,12 +145,6 @@ func (c *Container) registerHandlers() error {
 		return err
 	}
 	if err := c.Provide(handler.NewTagHandler); err != nil {
-		return err
-	}
-	if err := c.Provide(handler.NewPageHandler); err != nil {
-		return err
-	}
-	if err := c.Provide(handler.NewWorkspaceHandler); err != nil {
 		return err
 	}
 	if err := c.Provide(handler.NewCommentHandler); err != nil {
