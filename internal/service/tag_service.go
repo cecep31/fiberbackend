@@ -13,7 +13,7 @@ type tagService struct {
 
 type TagService interface {
 	CreateTag(ctx context.Context, tag *model.Tag) error
-	GetTags(ctx context.Context) ([]model.Tag, error)
+	GetTags(ctx context.Context, offset, limit int) ([]model.Tag, int64, error)
 	GetTagByID(ctx context.Context, id uint) (*model.Tag, error)
 	GetTagByName(ctx context.Context, name string) (*model.Tag, error)
 	FindOrCreateByName(ctx context.Context, name string) (*model.Tag, error)
@@ -32,8 +32,8 @@ func (s *tagService) CreateTag(ctx context.Context, tag *model.Tag) error {
 	return s.tagRepo.Create(ctx, tag)
 }
 
-func (s *tagService) GetTags(ctx context.Context) ([]model.Tag, error) {
-	return s.tagRepo.FindAll(ctx)
+func (s *tagService) GetTags(ctx context.Context, offset, limit int) ([]model.Tag, int64, error) {
+	return s.tagRepo.FindAll(ctx, offset, limit)
 }
 
 func (s *tagService) GetTagByID(ctx context.Context, id uint) (*model.Tag, error) {

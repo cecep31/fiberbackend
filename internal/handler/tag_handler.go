@@ -4,6 +4,7 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
@@ -31,12 +32,18 @@ func (h *TagHandler) CreateTag(c fiber.Ctx) error {
 }
 
 func (h *TagHandler) GetTags(c fiber.Ctx) error {
-	tags, err := h.service.GetTags(c.Context())
+	limit, offset, err := validator.ValidatePaginationWithDefaults(c.Query("limit"), c.Query("offset"))
+	if err != nil {
+		return response.BadRequest(c, "Invalid pagination parameters", err)
+	}
+
+	tags, total, err := h.service.GetTags(c.Context(), offset, limit)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get tags", err)
 	}
 
-	return response.Success(c, "Successfully retrieved tags", tags)
+	meta := response.CalculatePaginationMeta(total, offset, limit)
+	return response.SuccessWithMeta(c, "Successfully retrieved tags", tags, meta)
 }
 
 func (h *TagHandler) GetTagByID(c fiber.Ctx) error {

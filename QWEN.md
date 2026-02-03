@@ -1,63 +1,48 @@
-# Echo Backend API - Project Context
+# FiberBackend - Modern Go REST API
 
 ## Project Overview
 
-Echo Backend API is a REST API for a blog/content management system built with Go, Echo framework, and PostgreSQL. It provides a full-featured backend for managing users, posts, comments, tags, workspaces, and pages with comprehensive authentication and authorization features.
+FiberBackend is a modern REST API for a blog/content management system built with Go and the Fiber web framework. Despite the README incorrectly mentioning the Echo framework, the project actually uses the Fiber framework (v3.0.0) as evidenced in the go.mod file. The application connects to PostgreSQL for data persistence and includes features like user management, content management, social features, real-time chat, and file storage.
 
-### Key Technologies & Architecture
+### Key Technologies
+- **Go**: 1.25+
+- **Fiber Framework**: v3.0.0 (not Echo as incorrectly mentioned in README)
+- **GORM**: v1.31.1 for database ORM
+- **PostgreSQL**: 14+ via pgx driver
+- **JWT Authentication**: github.com/golang-jwt/jwt/v5
+- **File Storage**: MinIO/S3 compatible storage
+- **Dependency Injection**: go.uber.org/dig
+- **Validation**: go-playground/validator
 
-- **Go 1.25.0** with modern dependency management
-- **Echo v4 framework** for HTTP routing
-- **PostgreSQL** database with GORM ORM
-- **JWT authentication** for secure API access
-- **Dependency injection** using go.uber.org/dig
-- **Docker support** for containerization
-- **S3 storage** (MinIO compatible) for file uploads
-- **Gin-gonic style** architecture with separation of concerns (handlers, services, repositories)
-
-### Core Features
-
-- User authentication & management
-- Posts, comments, and tags
-- User follows and post likes
-- Workspaces and pages
-- JWT authentication
-- PostgreSQL database
-- Rate limiting capabilities
-- File storage with S3/MinIO
-- Comprehensive logging with zerolog
-
-### Project Structure
-
-```
-├── cmd/                    # Application entry point (main.go)
-├── internal/               # Private application code
-│   ├── di/                 # Dependency injection setup
-│   ├── handler/            # HTTP handlers
-│   ├── service/            # Business logic
-│   ├── repository/         # Data access layer
-│   ├── model/              # Database models
-│   └── middleware/         # Custom middleware
-├── pkg/                    # Shared packages
-│   ├── database/           # Database connection & wrapper
-│   ├── response/           # HTTP response utilities
-│   ├── storage/            # S3 storage interface
-│   ├── utils/              # Utility functions
-│   ├── validator/          # Custom validation
-│   └── ...                 # Other shared utilities
-├── config/                 # Configuration management
-├── migrations/             # Database migrations (future)
-├── api_doc.md              # API documentation
-└── Makefile                # Build and development commands
-```
+### Architecture
+The project follows a clean architecture pattern with separation of concerns:
+- **cmd/**: Application entry point (`main.go`)
+- **config/**: Configuration management with environment variable loading
+- **internal/**: Private application code
+  - **handler/**: HTTP request handlers
+  - **service/**: Business logic layer
+  - **repository/**: Data access layer
+  - **model/**: Database models and DTOs
+  - **middleware/**: HTTP middleware (authentication, logging, security)
+  - **routes/**: Route definitions and setup
+  - **di/**: Dependency injection container setup
+- **migrations/**: Database migration files
+- **test/**: Test files
+- **pkg/**: Shared utilities
+  - **database/**: Database connection and wrapper
+  - **response/**: Standardized response helpers
+  - **storage/**: File storage utilities
+  - **utils/**: General utility functions
+  - **validator/**: Custom validator implementation
 
 ## Building and Running
 
 ### Prerequisites
-- Go 1.21+
+- Go 1.25+
 - PostgreSQL 14+
+- Docker (optional, for containerized deployment)
 
-### Setup and Development
+### Local Development Setup
 
 1. **Clone and setup:**
    ```bash
@@ -66,84 +51,148 @@ Echo Backend API is a REST API for a blog/content management system built with G
    cp .env.example .env
    ```
 
-2. **Configure database:**
-   Edit `.env` file with your PostgreSQL credentials:
+2. **Configure environment:**
+   Edit `.env` file with your configuration:
    ```env
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_USER=postgres
-   DB_PASSWORD=your_password
-   DB_NAME=your_database_name
+   # Server
+   PORT=8080
+
+   # Database
+   DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+   MAX_OPEN_CONNS=30
+   MAX_IDLE_CONNS=2
+   CONN_MAX_LIFETIME=30m
+
+   # Authentication
+   JWT_SECRET=your-secret-key
+
+   # File Storage (MinIO/S3)
+   MINIO_ENDPOINT=localhost:9000
+   MINIO_ACCESS_KEY=minioadmin
+   MINIO_SECRET_KEY=minioadmin
+   MINIO_BUCKET=minio-bucket
+
+   # Rate Limiting
+   RATE_LIMITER_MAX=0
+   RATE_LIMITER_TTL=60
+
+   # Debug
+   DEBUG=false
    ```
 
-3. **Build and run:**
+3. **Run:**
    ```bash
+   # Install dependencies
    go mod download
+
+   # Run migrations (if using migration tool)
+   # psql -d your_database_name -f migrations/*.sql
+
+   # Start the server
    go run cmd/main.go
    ```
 
-### Make Commands
+   Server starts at `http://localhost:8080`
 
-The project includes a comprehensive Makefile with the following commands:
-- `make build` - Build the binary
-- `make run` - Run the application
-- `make test` - Run all tests
-- `make test-race` - Run tests with race detection
-- `make test-coverage` - Generate coverage report
-- `make fmt` - Format code
-- `make lint` - Run linter
-- `make check` - Run all quality checks
-- `make dev` - Run with hot reload using Air
-- `make docker-build` - Build Docker image
-- `make docker-run` - Run Docker container
+### Development Commands
 
-### Development Conventions
+```bash
+# Build and run
+make build
+make dev
 
-- **Code formatting:** Follow standard Go formatting (use `make fmt`)
-- **Testing:** Write tests for new features (use `make test`)
-- **Dependencies:** Use Go modules, organize with dependency injection
-- **Error handling:** Proper error handling and logging
-- **Configuration:** Use environment variables with defaults
-- **Authentication:** JWT-based authentication for protected routes
+# Run tests
+make test
 
-### Configuration
+# Code quality
+make fmt
+make vet
+make lint
+```
 
-The application uses a comprehensive configuration system that reads from environment variables with sensible defaults:
+### Using Air for Hot Reload
 
-- **App_Port** - Server port (default: 8080)
-- **JWT_SECRET** - JWT signing key
-- **DATABASE_URL** - PostgreSQL connection string
-- **MaxOpenConns/MaxIdleConns** - Database connection pool settings
-- **S3 Configuration** - For file storage (MinIO compatible)
-- **Rate limiting settings** - For API protection
+The project includes `.air.toml` configuration for the Air live reload tool:
+```bash
+# Install air if not already installed
+go install github.com/air-verse/air@latest
 
-### Testing
+# Run with hot reload
+air
+```
 
-The project supports multiple testing approaches:
-- Unit tests: `make test`
-- Short tests: `make test-short`
-- Race condition testing: `make test-race`
-- Coverage reports: `make test-coverage`
+### Docker Deployment
 
-### Docker Support
+```bash
+# Build and run
+docker build -t fiberbackend .
+docker run -p 8080:8080 fiberbackend
+```
 
-The application includes a Dockerfile and can be built and run as a containerized application:
-- Build: `make docker-build`
-- Run: `make docker-run`
+### Fly.io Deployment
 
-### API Documentation
+The project includes `fly.toml` for easy deployment to Fly.io:
+```bash
+# Deploy to Fly.io
+flyctl deploy
+```
 
-Detailed API endpoints and examples are available in [api_doc.md](api_doc.md).
+## Features
 
-## Architecture Patterns
+- **User Management**: Complete user system with authentication, profiles, and following
+- **Content Management**: Posts with rich text, images, tags, and versioning
+- **Social Features**: User follows, post likes, comments, and bookmarks
+- **Real-time Chat**: Conversational AI with message history and token tracking
+- **File Storage**: MinIO/S3 integration for file uploads and management
+- **Analytics**: Post view tracking and statistics
+- **Security**: JWT authentication, rate limiting, and input validation
+- **Performance**: Database connection pooling, caching, and optimized queries
+- **Monitoring**: Comprehensive logging and metrics
 
-The application follows clean architecture principles with clear separation of concerns:
+## API Structure
 
-- **Models**: Define data structures
-- **Repositories**: Handle database operations
-- **Services**: Implement business logic
-- **Handlers**: Handle HTTP requests/responses
-- **Middleware**: Handle cross-cutting concerns (auth, logging, etc.)
-- **Dependency Injection**: Wire components together using go.uber.org/dig
+The API follows REST conventions with versioning:
+- Base path: `/v1`
+- Authentication: JWT tokens in Authorization header
+- Response format: JSON with standardized structure
 
-This architecture promotes testability, maintainability, and scalability of the application.
+Available API groups:
+- `/v1/users` - User management
+- `/v1/posts` - Content management
+- `/v1/auth` - Authentication endpoints
+- `/v1/tags` - Tag management
+- `/v1/pages` - Page management
+- `/v1/workspaces` - Workspace management
+- `/v1/chat/conversations` - Chat functionality
+- Debug routes available when `DEBUG=true`
+
+## Development Conventions
+
+- **Code Style**: Follows Go idiomatic conventions
+- **Testing**: Unit and integration tests using testify package
+- **Dependency Injection**: Uses Uber's dig for dependency injection
+- **Configuration**: Environment-based configuration with defaults
+- **Logging**: Structured logging with request ID correlation
+- **Error Handling**: Consistent error response format
+- **Security**: Built-in middleware for CORS, helmet, rate limiting, etc.
+
+## Project Structure Notes
+
+The project correctly implements a layered architecture with clear separation between:
+1. HTTP layer (handlers and routes)
+2. Business logic layer (services)
+3. Data access layer (repositories)
+4. Data models (models)
+
+The dependency injection system in the `internal/di` package manages the lifecycle of all services and ensures loose coupling between components.
+
+## Important Files
+
+- `cmd/main.go` - Application entry point with graceful shutdown
+- `config/config.go` - Centralized configuration management
+- `internal/routes/routes.go` - API route definitions
+- `internal/middleware/setup.go` - Security and utility middleware
+- `pkg/database/setup.go` - Database connection with retry logic
+- `.air.toml` - Development hot reload configuration
+- `Dockerfile` - Multi-stage Docker build
+- `fly.toml` - Fly.io deployment configuration

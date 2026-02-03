@@ -16,7 +16,7 @@ var (
 
 type TagRepository interface {
 	Create(ctx context.Context, tag *model.Tag) error
-	FindAll(ctx context.Context) ([]model.Tag, error)
+	FindAll(ctx context.Context, offset, limit int) ([]model.Tag, int64, error)
 	FindByID(ctx context.Context, id uint) (*model.Tag, error)
 	FindByName(ctx context.Context, name string) (*model.Tag, error)
 	Update(ctx context.Context, tag *model.Tag) error
@@ -43,13 +43,27 @@ func (r *tagRepository) Create(ctx context.Context, tag *model.Tag) error {
 	return nil
 }
 
-func (r *tagRepository) FindAll(ctx context.Context) ([]model.Tag, error) {
+func (r *tagRepository) FindAll(ctx context.Context, offset, limit int) ([]model.Tag, int64, error) {
 	var tags []model.Tag
-	err := r.db.WithContext(ctx).Find(&tags).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to find all tags: %w", err)
+	var totalCount int64
+
+	if offset < 0 {
+		return nil, 0, errors.New("offset cannot be negative")
 	}
-	return tags, nil
+	if limit <= 0 || limit > 100 {
+		return nil, 0, errors.New("limit must be between 1 and 100")
+	}
+
+	err := r.db.WithContext(ctx).Model((*model.Tag)(nil)).Count(&totalCount).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count tags: %w", err)
+	}
+
+	err = r.db.WithContext(ctx).Offset(offset).Limit(limit).Find(&tags).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to find all tags: %w", err)
+	}
+	return tags, totalCount, nil
 }
 
 func (r *tagRepository) FindByID(ctx context.Context, id uint) (*model.Tag, error) {
