@@ -1,6 +1,6 @@
-# Echo Backend API
+# Fiber Backend API
 
-A modern REST API for a blog/content management system built with Go, Echo framework, and PostgreSQL. Features include user management, posts, comments, chat functionality, file uploads, and more.
+A modern REST API for a blog/content management system built with Go, Fiber framework, and PostgreSQL. Features include user management, posts, comments, chat functionality, file uploads, and more.
 
 ## Features
 
@@ -143,7 +143,7 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 ## Technologies
 
 - **Go**: 1.25+
-- **Echo Framework**: v4.13.4
+- **Fiber Framework**: v3.0.0
 - **GORM**: v1.31.1
 - **PostgreSQL**: 14+
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
