@@ -1,0 +1,29 @@
+# Environment variables
+.env
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when run with the -o option
+*.out
+
+# Dependency directories (remove if you use vendoring)
+vendor/
+
+# Go workspace file
+go.work
+
+# Temporary files
+tmp/
+
+
+bin/fiberbackend
+bin/fiberbackend.exe
+bin/main

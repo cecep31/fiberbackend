@@ -1,0 +1,347 @@
+package handler
+
+import (
+	"fiberbackend/internal/model"
+	"fiberbackend/internal/service"
+	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+type PostHandler struct {
+	postService     service.PostService
+	postViewService service.PostViewService
+}
+
+func NewPostHandler(postService service.PostService, postViewService service.PostViewService) *PostHandler {
+	return &PostHandler{
+		postService:     postService,
+		postViewService: postViewService,
+	}
+}
+
+func (h *PostHandler) GetPosts(c fiber.Ctx) error {
+	// Parse query parameters into filter struct
+	filter := &model.PostQueryFilter{
+		Limit:     10, // Default limit
+		Offset:    0,  // Default offset
+		Search:    c.Query("search"),
+		SortBy:    c.Query("sort_by"),
+		SortOrder: c.Query("sort_order"),
+		StartDate: c.Query("start_date"),
+		EndDate:   c.Query("end_date"),
+		CreatedBy: c.Query("created_by"),
+	}
+
+	// Parse limit and offset
+	if limit := c.Query("limit"); limit != "" {
+		if limitInt, err := strconv.Atoi(limit); err == nil && limitInt > 0 {
+			filter.Limit = limitInt
+		}
+	}
+
+	if offset := c.Query("offset"); offset != "" {
+		if offsetInt, err := strconv.Atoi(offset); err == nil && offsetInt > 0 {
+			filter.Offset = offsetInt
+		}
+	}
+
+	// Parse published filter
+	if published := c.Query("published"); published != "" {
+		if pubBool, err := strconv.ParseBool(published); err == nil {
+			filter.Published = &pubBool
+		}
+	}
+
+	// Parse tags filter
+	if tags := c.Query("tags"); tags != "" {
+		filter.Tags = strings.Split(tags, ",")
+		// Trim whitespace from each tag
+		for i, tag := range filter.Tags {
+			filter.Tags[i] = strings.TrimSpace(tag)
+		}
+	}
+
+	posts, total, err := h.postService.GetPostsFiltered(c.Context(), filter)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > 250 {
+			truncated := (*post.Body)[:250] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	meta := response.PaginationMeta{
+		TotalItems: int(total),
+		Offset:     filter.Offset,
+		Limit:      filter.Limit,
+		TotalPages: int(total)/filter.Limit + 1,
+	}
+	if int(total)%filter.Limit == 0 {
+		meta.TotalPages = int(total) / filter.Limit
+	}
+
+	return response.SuccessWithMeta(c, "Successfully retrieved posts", posts, meta)
+}
+
+func (h *PostHandler) CreatePost(c fiber.Ctx) error {
+	var postReq model.CreatePostDTO
+	if err := c.Bind().Body(&postReq); err != nil {
+		return response.BadRequest(c, "Failed to create post", err)
+	}
+
+	if err := validator.ValidateStruct(postReq); err != nil {
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
+				Success: false,
+				Message: "Validation failed",
+				Error:   validationErrors.Error(),
+				Data:    validationErrors.Errors,
+			})
+		}
+		return response.ValidationError(c, "Validation failed", err)
+	}
+
+	claims, _ := c.Locals("user").(jwt.MapClaims)
+	userID := fmt.Sprintf("%v", claims["user_id"])
+
+	newpost, err := h.postService.CreatePost(c.Context(), &postReq, userID)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to create post", err)
+	}
+	return response.Created(c, "Successfully created post", map[string]any{
+		"id": newpost.ID,
+	})
+}
+
+func (h *PostHandler) UpdatePost(c fiber.Ctx) error {
+	id := c.Params("id")
+	var updateDTO model.UpdatePostDTO
+	if err := c.Bind().Body(&updateDTO); err != nil {
+		return response.BadRequest(c, "Failed to update post", err)
+	}
+
+	if err := validator.ValidateStruct(updateDTO); err != nil {
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
+				Success: false,
+				Message: "Validation failed",
+				Error:   validationErrors.Error(),
+				Data:    validationErrors.Errors,
+			})
+		}
+		return response.ValidationError(c, "Validation failed", err)
+	}
+
+	claims, _ := c.Locals("user").(jwt.MapClaims)
+	userID := fmt.Sprintf("%v", claims["user_id"])
+
+	// Check if the user is the author of the post
+	err := h.postService.IsAuthor(c.Context(), id, userID)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to check post ownership", err)
+	}
+
+	updatedPost, err := h.postService.UpdatePost(c.Context(), id, &updateDTO)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to update post", err)
+	}
+
+	return response.Success(c, "Post updated successfully", updatedPost)
+}
+
+func (h *PostHandler) GetPostBySlugAndUsername(c fiber.Ctx) error {
+	slug := c.Params("slug")
+	username := c.Params("username")
+	post, err := h.postService.GetPostBySlugAndUsername(c.Context(), slug, username)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get post", err)
+	}
+
+	return response.Success(c, "Successfully retrieved post", post)
+}
+
+func (h *PostHandler) GetPost(c fiber.Ctx) error {
+	id := c.Params("id")
+	post, err := h.postService.GetPostByID(c.Context(), id)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get post", err)
+	}
+
+	return response.Success(c, "Successfully retrieved post", post)
+}
+
+func (h *PostHandler) DeletePost(c fiber.Ctx) error {
+	id := c.Params("id")
+	err := h.postService.DeletePostByID(c.Context(), id)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to delete post", err)
+	}
+
+	return response.Success(c, "Successfully deleted post", nil)
+}
+
+func (h *PostHandler) GetPostsRandom(c fiber.Ctx) error {
+	limit := c.Query("limit") // Default limit if not provided or invalid
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil {
+		limitInt = 9 // Default limit if not provided or invalid
+	}
+	// Ensure limit doesn't exceed 20
+	if limitInt > 20 {
+		limitInt = 20 // Limit to 20
+	}
+	posts, err := h.postService.GetPostsRandom(c.Context(), limitInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > 250 {
+			truncated := (*post.Body)[:250] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	return response.Success(c, "Successfully retrieved posts", posts)
+}
+
+func (h *PostHandler) GetMyPosts(c fiber.Ctx) error {
+	offset := c.Query("offset")
+	limit := c.Query("limit")
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil {
+		offsetInt = 0 // Default offset if not provided or invalid
+	}
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil {
+		limitInt = 10 // Default limit if not provided or invalid
+	}
+	claims, _ := c.Locals("user").(jwt.MapClaims)
+	userID := fmt.Sprintf("%v", claims["user_id"])
+	posts, total, err := h.postService.GetPostsByCreatedBy(c.Context(), userID, offsetInt, limitInt)
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > 250 {
+			truncated := (*post.Body)[:250] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
+
+	meta := response.PaginationMeta{
+		TotalItems: int(total),
+		Offset:     offsetInt,
+		Limit:      limitInt,
+		TotalPages: int(total)/limitInt + 1,
+	}
+	if int(total)%limitInt == 0 {
+		meta.TotalPages = int(total) / limitInt
+	}
+
+	return response.SuccessWithMeta(c, "success retrieving posts", posts, meta)
+}
+
+func (h *PostHandler) GetPostsByUsername(c fiber.Ctx) error {
+	username := c.Params("username")
+	offset := c.Query("offset")
+	limit := c.Query("limit")
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil {
+		offsetInt = 0 // Default offset if not provided or invalid
+	}
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil {
+		limitInt = 10 // Default limit if not provided or invalid
+	}
+	posts, total, err := h.postService.GetPostsByUsername(c.Context(), username, offsetInt, limitInt)
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > 250 {
+			truncated := (*post.Body)[:250] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
+
+	meta := response.PaginationMeta{
+		TotalItems: int(total),
+		Offset:     offsetInt,
+		Limit:      limitInt,
+		TotalPages: int(total)/limitInt + 1,
+	}
+	if int(total)%limitInt == 0 {
+		meta.TotalPages = int(total) / limitInt
+	}
+
+	return response.SuccessWithMeta(c, "success retrieving posts", posts, meta)
+}
+
+func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
+	tag := c.Params("tag")
+	offset := c.Query("offset")
+	limit := c.Query("limit")
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil {
+		offsetInt = 0 // Default offset if not provided or invalid
+	}
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil {
+		limitInt = 10 // Default limit if not provided or invalid
+	}
+	posts, total, err := h.postService.GetPostsByTag(c.Context(), tag, limitInt, offsetInt)
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > 250 {
+			truncated := (*post.Body)[:250] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts by tag", err)
+	}
+
+	meta := response.PaginationMeta{
+		TotalItems: int(total),
+		Offset:     offsetInt,
+		Limit:      limitInt,
+		TotalPages: int(total)/limitInt + 1,
+	}
+	if int(total)%limitInt == 0 {
+		meta.TotalPages = int(total) / limitInt
+	}
+
+	return response.SuccessWithMeta(c, "success retrieving posts by tag", posts, meta)
+}
+
+func (h *PostHandler) UploadImagePosts(c fiber.Ctx) error {
+	file, err := c.FormFile("image")
+	if err != nil {
+		return response.BadRequest(c, "Failed to upload image", err)
+	}
+
+	if file == nil {
+		return response.BadRequest(c, "No file uploaded", nil)
+	}
+
+	if err := h.postService.UploadImagePosts(c.Context(), file); err != nil {
+		return response.InternalServerError(c, "Failed to upload image", err)
+	}
+	return response.Success(c, "success uploading image", nil)
+}
