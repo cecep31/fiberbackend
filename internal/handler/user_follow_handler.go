@@ -4,7 +4,6 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 	"fmt"
 	"strconv"
 
@@ -43,11 +42,7 @@ func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
 	// Get user ID to follow from request body
 	var followReq model.FollowRequest
 	if err := c.Bind().Body(&followReq); err != nil {
-		return response.BadRequest(c, "Invalid request body", err)
-	}
-
-	if err := validator.ValidateStruct(followReq); err != nil {
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	// Follow the user

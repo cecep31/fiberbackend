@@ -4,9 +4,7 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 	"fmt"
-	"net/http"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
@@ -26,19 +24,7 @@ func NewChatConversationHandler(chatConversationService service.ChatConversation
 func (h *ChatConversationHandler) CreateConversation(c fiber.Ctx) error {
 	var conversationReq model.CreateChatConversationDTO
 	if err := c.Bind().Body(&conversationReq); err != nil {
-		return response.BadRequest(c, "Failed to create conversation", err)
-	}
-
-	if err := validator.ValidateStruct(conversationReq); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	// Get the user ID from the JWT token
@@ -108,19 +94,7 @@ func (h *ChatConversationHandler) UpdateConversation(c fiber.Ctx) error {
 	id := c.Params("id")
 	var updateDTO model.UpdateChatConversationDTO
 	if err := c.Bind().Body(&updateDTO); err != nil {
-		return response.BadRequest(c, "Failed to update conversation", err)
-	}
-
-	if err := validator.ValidateStruct(updateDTO); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	// Get the user ID from the JWT token

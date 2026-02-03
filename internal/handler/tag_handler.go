@@ -21,7 +21,7 @@ func NewTagHandler(service service.TagService) *TagHandler {
 func (h *TagHandler) CreateTag(c fiber.Ctx) error {
 	tag := new(model.Tag)
 	if err := c.Bind().Body(tag); err != nil {
-		return response.BadRequest(c, "Invalid request payload", err)
+		return response.HandleBindError(c, err)
 	}
 
 	if err := h.service.CreateTag(c.Context(), tag); err != nil {
@@ -68,7 +68,7 @@ func (h *TagHandler) UpdateTag(c fiber.Ctx) error {
 
 	tag := new(model.Tag)
 	if err := c.Bind().Body(tag); err != nil {
-		return response.BadRequest(c, "Invalid request payload", err)
+		return response.HandleBindError(c, err)
 	}
 	tag.ID = int(id)
 

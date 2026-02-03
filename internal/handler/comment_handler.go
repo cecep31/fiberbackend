@@ -4,9 +4,7 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 	"fmt"
-	"net/http"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
@@ -31,19 +29,7 @@ func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 
 	var dto model.CreatePostCommentDTO
 	if err := c.Bind().Body(&dto); err != nil {
-		return response.BadRequest(c, "Invalid request payload", err)
-	}
-
-	if err := validator.ValidateStruct(dto); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	// Get user ID from JWT token
@@ -82,19 +68,7 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 
 	var dto model.CreatePostCommentDTO
 	if err := c.Bind().Body(&dto); err != nil {
-		return response.BadRequest(c, "Invalid request payload", err)
-	}
-
-	if err := validator.ValidateStruct(dto); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	// Get user ID from JWT token

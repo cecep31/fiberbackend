@@ -3,7 +3,6 @@ package handler
 import (
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -53,19 +52,7 @@ func NewAuthHandler(authService service.AuthService) *AuthHandler {
 func (h *AuthHandler) Register(c fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	user, err := h.authService.Register(c.Context(), req.Email, req.Username, req.Password)
@@ -90,19 +77,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 func (h *AuthHandler) Login(c fiber.Ctx) error {
 	var loginReq LoginRequest
 	if err := c.Bind().Body(&loginReq); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(loginReq); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	token, refreshToken, user, err := h.authService.Login(c.Context(), loginReq.Email, loginReq.Password)
@@ -127,19 +102,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 func (h *AuthHandler) CheckUsername(c fiber.Ctx) error {
 	var req CheckUsernameRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	isAvailable, err := h.authService.CheckUsernameAvailability(c.Context(), req.Username)
@@ -156,19 +119,7 @@ func (h *AuthHandler) CheckUsername(c fiber.Ctx) error {
 func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 	var req ForgotPasswordRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	err := h.authService.ForgotPassword(c.Context(), req.Email)
@@ -186,19 +137,7 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 	var req ResetPasswordRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	err := h.authService.ResetPassword(c.Context(), req.Token, req.Password)
@@ -215,19 +154,7 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 	var req RefreshTokenRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	token, refreshToken, user, err := h.authService.RefreshToken(c.Context(), req.RefreshToken)
@@ -252,19 +179,7 @@ func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 	var req ChangePasswordRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return response.BadRequest(c, "Invalid request format", err)
-	}
-
-	if err := validator.ValidateStruct(req); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	userID, ok := c.Locals("user_id").(string)

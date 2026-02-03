@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 
+	"fiberbackend/pkg/validator"
+
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -56,6 +58,25 @@ func Created(c fiber.Ctx, message string, data any) error {
 		Message: message,
 		Data:    data,
 	})
+}
+
+// HandleBindError handles errors from c.Bind().Body(). If the error is validation
+// errors from the StructValidator, returns 400 with Message "Validation failed" and
+// Data set to the list of field errors. Otherwise returns BadRequest.
+func HandleBindError(c fiber.Ctx, err error) error {
+	if err == nil {
+		return nil
+	}
+	if validationErrors, ok := err.(validator.ValidationErrors); ok {
+		log.Printf("Validation error (bind) request_id=%s errors=%d", c.Get(fiber.HeaderXRequestID), len(validationErrors.Errors))
+		return c.Status(http.StatusBadRequest).JSON(APIResponse{
+			Success: false,
+			Message: "Validation failed",
+			Error:   validationErrors.Error(),
+			Data:    validationErrors.Errors,
+		})
+	}
+	return BadRequest(c, "Invalid request format", err)
 }
 
 // BadRequest sends a bad request error response

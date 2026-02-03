@@ -5,9 +5,7 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -97,19 +95,7 @@ func (h *PostHandler) GetPosts(c fiber.Ctx) error {
 func (h *PostHandler) CreatePost(c fiber.Ctx) error {
 	var postReq model.CreatePostDTO
 	if err := c.Bind().Body(&postReq); err != nil {
-		return response.BadRequest(c, "Failed to create post", err)
-	}
-
-	if err := validator.ValidateStruct(postReq); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	claims, ok := c.Locals("user").(jwt.MapClaims)
@@ -131,19 +117,7 @@ func (h *PostHandler) UpdatePost(c fiber.Ctx) error {
 	id := c.Params("id")
 	var updateDTO model.UpdatePostDTO
 	if err := c.Bind().Body(&updateDTO); err != nil {
-		return response.BadRequest(c, "Failed to update post", err)
-	}
-
-	if err := validator.ValidateStruct(updateDTO); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			return c.Status(http.StatusBadRequest).JSON(response.APIResponse{
-				Success: false,
-				Message: "Validation failed",
-				Error:   validationErrors.Error(),
-				Data:    validationErrors.Errors,
-			})
-		}
-		return response.ValidationError(c, "Validation failed", err)
+		return response.HandleBindError(c, err)
 	}
 
 	claims, ok := c.Locals("user").(jwt.MapClaims)
