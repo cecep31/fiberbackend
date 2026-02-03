@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for fiberbackend on 2024-11-25T09:50:39+07:00
+# fly.toml app configuration file generated for fiberbackend on 2026-02-03T13:49:59+07:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -19,3 +19,6 @@ primary_region = 'sin'
 
 [[vm]]
   size = 'shared-cpu-1x'
+  memory = '256mb'
+  cpus = 1
+  memory_mb = 256
