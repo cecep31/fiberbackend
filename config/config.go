@@ -60,7 +60,7 @@ func Load() (*Config, error) {
 
 	config := &Config{
 		AppPort:         getEnv("PORT", "8080"),
-		JWTSecret:       getEnv("JWT_SECRET", "your-secret-key"),
+		JWTSecret:       getEnv("JWT_SECRET", ""), // No default: must be set explicitly for security
 		DatabaseURL:     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"),
 		MaxOpenConns:    getEnvAsInt("MAX_OPEN_CONNS", 30),
 		MaxIdleConns:    getEnvAsInt("MAX_IDLE_CONNS", 2),
@@ -133,7 +133,11 @@ func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 // Returns an error if any required field is missing or invalid.
 func (c *Config) validate() error {
 	if c.JWTSecret == "" {
-		return fmt.Errorf("JWT_SECRET is required")
+		return fmt.Errorf("JWT_SECRET is required and must be set in environment")
+	}
+	// Reject common placeholder/weak secrets
+	if c.JWTSecret == "your-secret-key" || len(c.JWTSecret) < 32 {
+		return fmt.Errorf("JWT_SECRET must be at least 32 characters and not a placeholder value")
 	}
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")

@@ -161,8 +161,6 @@ Available API groups:
 - `/v1/posts` - Content management
 - `/v1/auth` - Authentication endpoints
 - `/v1/tags` - Tag management
-- `/v1/pages` - Page management
-- `/v1/workspaces` - Workspace management
 - `/v1/chat/conversations` - Chat functionality
 - Debug routes available when `DEBUG=true`
 

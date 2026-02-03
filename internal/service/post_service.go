@@ -25,6 +25,9 @@ type PostService interface {
 	IsAuthor(ctx context.Context, id string, userid string) error
 }
 
+// ErrNotAuthor is returned when the user is not the author of the resource.
+var ErrNotAuthor = errors.New("not author")
+
 type postService struct {
 	postRepo   repository.PostRepository
 	tagService TagService
@@ -41,7 +44,7 @@ func (s *postService) IsAuthor(ctx context.Context, id string, userid string) er
 		return err
 	}
 	if post.CreatedBy == nil || *post.CreatedBy != userid {
-		return errors.New("not author")
+		return ErrNotAuthor
 	}
 	return nil
 }

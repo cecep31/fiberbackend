@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
@@ -111,7 +112,10 @@ func (h *PostHandler) CreatePost(c fiber.Ctx) error {
 		return response.ValidationError(c, "Validation failed", err)
 	}
 
-	claims, _ := c.Locals("user").(jwt.MapClaims)
+	claims, ok := c.Locals("user").(jwt.MapClaims)
+	if !ok || claims["user_id"] == nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 	userID := fmt.Sprintf("%v", claims["user_id"])
 
 	newpost, err := h.postService.CreatePost(c.Context(), &postReq, userID)
@@ -142,12 +146,18 @@ func (h *PostHandler) UpdatePost(c fiber.Ctx) error {
 		return response.ValidationError(c, "Validation failed", err)
 	}
 
-	claims, _ := c.Locals("user").(jwt.MapClaims)
+	claims, ok := c.Locals("user").(jwt.MapClaims)
+	if !ok || claims["user_id"] == nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 	userID := fmt.Sprintf("%v", claims["user_id"])
 
 	// Check if the user is the author of the post
 	err := h.postService.IsAuthor(c.Context(), id, userID)
 	if err != nil {
+		if errors.Is(err, service.ErrNotAuthor) {
+			return response.Forbidden(c, "You are not the author of this post")
+		}
 		return response.InternalServerError(c, "Failed to check post ownership", err)
 	}
 
@@ -191,14 +201,16 @@ func (h *PostHandler) DeletePost(c fiber.Ctx) error {
 }
 
 func (h *PostHandler) GetPostsRandom(c fiber.Ctx) error {
-	limit := c.Query("limit") // Default limit if not provided or invalid
-	limitInt, err := strconv.Atoi(limit)
-	if err != nil {
-		limitInt = 9 // Default limit if not provided or invalid
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		limitStr = "6"
 	}
-	// Ensure limit doesn't exceed 20
+	limitInt, err := strconv.Atoi(limitStr)
+	if err != nil || limitInt < 1 {
+		limitInt = 6
+	}
 	if limitInt > 20 {
-		limitInt = 20 // Limit to 20
+		limitInt = 20
 	}
 	posts, err := h.postService.GetPostsRandom(c.Context(), limitInt)
 	if err != nil {
@@ -226,19 +238,21 @@ func (h *PostHandler) GetMyPosts(c fiber.Ctx) error {
 	if err != nil {
 		limitInt = 10 // Default limit if not provided or invalid
 	}
-	claims, _ := c.Locals("user").(jwt.MapClaims)
+	claims, ok := c.Locals("user").(jwt.MapClaims)
+	if !ok || claims["user_id"] == nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 	userID := fmt.Sprintf("%v", claims["user_id"])
 	posts, total, err := h.postService.GetPostsByCreatedBy(c.Context(), userID, offsetInt, limitInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
 
 	for _, post := range posts {
 		if post.Body != nil && len(*post.Body) > 250 {
 			truncated := (*post.Body)[:250] + " ..."
 			post.Body = &truncated
 		}
-	}
-
-	if err != nil {
-		return response.InternalServerError(c, "Failed to get posts", err)
 	}
 
 	meta := response.PaginationMeta{
@@ -267,16 +281,15 @@ func (h *PostHandler) GetPostsByUsername(c fiber.Ctx) error {
 		limitInt = 10 // Default limit if not provided or invalid
 	}
 	posts, total, err := h.postService.GetPostsByUsername(c.Context(), username, offsetInt, limitInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts", err)
+	}
 
 	for _, post := range posts {
 		if post.Body != nil && len(*post.Body) > 250 {
 			truncated := (*post.Body)[:250] + " ..."
 			post.Body = &truncated
 		}
-	}
-
-	if err != nil {
-		return response.InternalServerError(c, "Failed to get posts", err)
 	}
 
 	meta := response.PaginationMeta{
@@ -305,16 +318,15 @@ func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 		limitInt = 10 // Default limit if not provided or invalid
 	}
 	posts, total, err := h.postService.GetPostsByTag(c.Context(), tag, limitInt, offsetInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts by tag", err)
+	}
 
 	for _, post := range posts {
 		if post.Body != nil && len(*post.Body) > 250 {
 			truncated := (*post.Body)[:250] + " ..."
 			post.Body = &truncated
 		}
-	}
-
-	if err != nil {
-		return response.InternalServerError(c, "Failed to get posts by tag", err)
 	}
 
 	meta := response.PaginationMeta{

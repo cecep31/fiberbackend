@@ -16,6 +16,8 @@ import (
 )
 
 func InitMiddleware(app *fiber.App, config *config.Config) {
+	// Recover first so any panic in downstream middleware/handlers is caught
+	app.Use(recover.New())
 	app.Use(requestid.New())
 
 	// Add security headers
@@ -54,6 +56,5 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 	}
 
 	app.Use(compress.New())
-	app.Use(recover.New())
 	app.Use(cors.New(cors.Config{AllowOrigins: []string{"*"}}))
 }

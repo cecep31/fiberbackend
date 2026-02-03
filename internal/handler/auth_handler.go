@@ -267,7 +267,10 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 		return response.ValidationError(c, "Validation failed", err)
 	}
 
-	userID, _ := c.Locals("user_id").(string)
+	userID, ok := c.Locals("user_id").(string)
+	if !ok || userID == "" {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 
 	err := h.authService.ChangePassword(c.Context(), userID, req.CurrentPassword, req.NewPassword)
 	if err == service.ErrInvalidCredentials {

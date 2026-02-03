@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fiberbackend/config"
 	"fiberbackend/internal/di"
 	"fiberbackend/internal/middleware"
@@ -30,13 +31,14 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize Fiber
+	// Initialize Fiber with custom error handler so API always returns JSON
 	app := fiber.New(fiber.Config{
 		ReadTimeout:     10 * time.Second,
 		WriteTimeout:    15 * time.Second,
 		IdleTimeout:     60 * time.Second,
 		BodyLimit:       10 * 1024 * 1024,
 		StructValidator: validator.NewValidator(),
+		ErrorHandler:    jsonErrorHandler,
 	})
 
 	// Setup global middleware first (applies to all routes)
@@ -90,6 +92,19 @@ func main() {
 	}
 
 	log.Print("Server exited")
+}
+
+func jsonErrorHandler(c fiber.Ctx, err error) error {
+	code := http.StatusInternalServerError
+	var e *fiber.Error
+	if errors.As(err, &e) {
+		code = e.Code
+	}
+	return c.Status(code).JSON(map[string]any{
+		"success": false,
+		"message": "Request failed",
+		"error":   err.Error(),
+	})
 }
 
 func helloWorld(c fiber.Ctx) error {
