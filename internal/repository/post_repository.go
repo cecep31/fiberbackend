@@ -245,26 +245,29 @@ func (r *postRepository) GetPosts(ctx context.Context, limit int, offset int) ([
 }
 
 func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.Post, error) {
-	var post model.Post
-	// We need to find a post with a given slug AND created by a user with the given username.
-	err := r.db.WithContext(ctx).
-		Preload("User").                                    // Preload the User
-		Preload("Tags").                                    // Preload Tags
-		Joins("JOIN users ON users.id = posts.created_by"). // Join with users table
-		Where("posts.slug = ? AND users.username = ?", slug, username).
-		First(&post).Error // Find the first matching record
+	// Resolve username to user ID first (uses index on users.username), then fetch post by
+	// created_by + slug (uses unique index on posts). Avoids JOIN that can cause 42P01 and uses indexes.
+	var userID string
+	err := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("username = ?", username).
+		Limit(1).
+		Pluck("id", &userID).Error
+	if err != nil || userID == "" {
+		return nil, ErrPostNotFound
+	}
 
+	var post model.Post
+	err = r.db.WithContext(ctx).
+		Preload("User").
+		Preload("Tags").
+		Where("slug = ? AND created_by = ?", slug, userID).
+		First(&post).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrPostNotFound // Or a more specific "post with slug/username not found"
+			return nil, ErrPostNotFound
 		}
 		return nil, fmt.Errorf("failed to get post by slug '%s' and username '%s': %w", slug, username, err)
 	}
-	// The JOIN and WHERE clause should ensure post.User.Username matches,
-	// but an explicit check after loading can be added for extra safety if User is preloaded.
-	// if post.User == nil || post.User.Username != username {
-	//  return nil, ErrPostNotFound // Should not happen if JOIN is correct
-	// }
 	return &post, nil
 }
 
