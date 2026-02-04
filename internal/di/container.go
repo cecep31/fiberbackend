@@ -103,6 +103,9 @@ func (c *Container) registerRepositories() error {
 	if err := c.Provide(repository.NewUserFollowRepository); err != nil {
 		return err
 	}
+	if err := c.Provide(repository.NewHoldingRepository); err != nil {
+		return err
+	}
 	return c.Provide(repository.NewChatConversationRepository)
 }
 
@@ -131,6 +134,9 @@ func (c *Container) registerServices() error {
 	if err := c.Provide(service.NewUserFollowService); err != nil {
 		return err
 	}
+	if err := c.Provide(service.NewHoldingService); err != nil {
+		return err
+	}
 	return c.Provide(service.NewChatConversationService)
 }
 
@@ -157,6 +163,9 @@ func (c *Container) registerHandlers() error {
 		return err
 	}
 	if err := c.Provide(handler.NewUserFollowHandler); err != nil {
+		return err
+	}
+	if err := c.Provide(handler.NewHoldingHandler); err != nil {
 		return err
 	}
 	return c.Provide(handler.NewChatConversationHandler)

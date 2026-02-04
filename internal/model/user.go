@@ -35,6 +35,7 @@ type User struct {
 	Sessions      []Session      `gorm:"foreignKey:UserID"`
 	Followers     []UserFollow   `gorm:"foreignKey:FollowingID"`
 	Following     []UserFollow   `gorm:"foreignKey:FollowerID"`
+	Holdings      []Holding      `gorm:"foreignKey:UserID"`
 }
 
 // TableName specifies the table name for GORM

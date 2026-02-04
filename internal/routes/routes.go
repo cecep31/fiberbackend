@@ -20,6 +20,7 @@ type Routes struct {
 	postLikeHandler         *handler.PostLikeHandler
 	userFollowHandler       *handler.UserFollowHandler
 	chatConversationHandler *handler.ChatConversationHandler
+	holdingHandler          *handler.HoldingHandler
 }
 
 func NewRoutes(
@@ -34,6 +35,7 @@ func NewRoutes(
 	postLikeHandler *handler.PostLikeHandler,
 	userFollowHandler *handler.UserFollowHandler,
 	chatConversationHandler *handler.ChatConversationHandler,
+	holdingHandler *handler.HoldingHandler,
 ) *Routes {
 	return &Routes{
 		config:                  config,
@@ -47,6 +49,7 @@ func NewRoutes(
 		postLikeHandler:         postLikeHandler,
 		userFollowHandler:       userFollowHandler,
 		chatConversationHandler: chatConversationHandler,
+		holdingHandler:          holdingHandler,
 	}
 }
 
@@ -61,6 +64,7 @@ func (r *Routes) setupV1Routes(v1 fiber.Router) {
 	r.setupPostRoutes(v1)
 	r.setupAuthRoutes(v1)
 	r.setupTagRoutes(v1)
+	r.setupHoldingsRoutes(v1)
 	r.setupChatConversationRoutes(v1)
 	if r.config.Debug {
 		r.setupDebugRoutes(v1)
