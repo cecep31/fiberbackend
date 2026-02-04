@@ -87,7 +87,7 @@ func (r *postRepository) UpdatePost(ctx context.Context, id string, postDTO *mod
 		// Or, if DTO might only contain tags to update, handle that separately.
 		// We should fetch the post to return it, even if no fields changed.
 		var currentPost model.Post
-		err := r.db.WithContext(ctx).Preload("Creator").Preload("Tags").First(&currentPost, "id = ?", id).Error
+		err := r.db.WithContext(ctx).Preload("User").Preload("Tags").First(&currentPost, "id = ?", id).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, ErrPostNotFound
@@ -107,7 +107,7 @@ func (r *postRepository) UpdatePost(ctx context.Context, id string, postDTO *mod
 
 	// After updating, fetch the post again to get the full model with associations
 	var updatedPost model.Post
-	err := r.db.WithContext(ctx).Preload("Creator").Preload("Tags").First(&updatedPost, "id = ?", id).Error
+	err := r.db.WithContext(ctx).Preload("User").Preload("Tags").First(&updatedPost, "id = ?", id).Error
 	if err != nil {
 		// This case (update succeeded but fetch failed) should be rare but handled.
 		return nil, fmt.Errorf("post updated, but failed to retrieve updated record: %w", err)
@@ -158,7 +158,7 @@ func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.
 	}
 
 	// Load the created post with all associations for return
-	err = r.db.WithContext(ctx).Preload("Creator").Preload("Tags").First(newpost, "id = ?", newpost.ID).Error
+	err = r.db.WithContext(ctx).Preload("User").Preload("Tags").First(newpost, "id = ?", newpost.ID).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to load created post with associations: %w", err)
 	}
@@ -186,10 +186,10 @@ func (r *postRepository) GetPostByUsername(ctx context.Context, username string,
 
 	// Get paginated records
 	// Re-apply Joins or ensure Preload works as expected.
-	// For Preload("Creator"), GORM uses the defined foreign keys.
+	// For Preload("User"), GORM uses the defined foreign keys.
 	// The explicit Join above is mainly for the WHERE clause on users.username.
 	err = r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("Creator"). // GORM will fetch Creator based on associations
+		Preload("User"). // GORM will fetch Creator based on associations
 		Preload("Tags").
 		Joins("JOIN users ON users.id = posts.created_by"). // Keep join for filtering
 		Where("users.username = ?", username).
@@ -230,7 +230,7 @@ func (r *postRepository) GetPosts(ctx context.Context, limit int, offset int) ([
 
 	// Get paginated published records
 	err = r.db.WithContext(ctx).
-		Preload("Creator").
+		Preload("User").
 		Preload("Tags").
 		Where("published = ?", true).
 		Order("created_at DESC").
@@ -248,7 +248,7 @@ func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug stri
 	var post model.Post
 	// We need to find a post with a given slug AND created by a user with the given username.
 	err := r.db.WithContext(ctx).
-		Preload("Creator").                                 // Preload the Creator
+		Preload("User").                                    // Preload the User
 		Preload("Tags").                                    // Preload Tags
 		Joins("JOIN users ON users.id = posts.created_by"). // Join with users table
 		Where("posts.slug = ? AND users.username = ?", slug, username).
@@ -271,7 +271,7 @@ func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug stri
 func (r *postRepository) GetPostByID(ctx context.Context, id string) (*model.Post, error) {
 	var post model.Post
 	err := r.db.WithContext(ctx).
-		Preload("Creator").              // Assuming Post model has a Creator field (struct or ID)
+		Preload("User").                 // Assuming Post model has a User field (struct or ID)
 		Preload("Tags").                 // Assuming Post model has a Tags field (slice of Tag)
 		First(&post, "id = ?", id).Error // GORM uses primary key by default if just `id` is passed to First
 
@@ -287,7 +287,7 @@ func (r *postRepository) GetPostByID(ctx context.Context, id string) (*model.Pos
 func (r *postRepository) GetPostsRandom(ctx context.Context, limit int) ([]*model.Post, error) {
 	var randomPosts []*model.Post
 	err := r.db.WithContext(ctx).
-		Preload("Creator").
+		Preload("User").
 		Preload("Tags").
 		Where("published = ?", true).
 		Order("RANDOM()"). // Works for PostgreSQL and SQLite. For others, might need specific syntax.
@@ -313,8 +313,8 @@ func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy stri
 
 	// Get paginated records
 	err = r.db.WithContext(ctx).
-		Preload("Creator"). // Preload creator details
-		Preload("Tags").    // Preload tags
+		Preload("User"). // Preload user details
+		Preload("Tags"). // Preload tags
 		Where("created_by = ?", createdBy).
 		Order("created_at DESC").
 		Offset(offset).
@@ -342,7 +342,7 @@ func (r *postRepository) SearchPosts(ctx context.Context, keyword string, limit 
 
 	// Get paginated records
 	err = r.db.WithContext(ctx).
-		Preload("Creator").
+		Preload("User").
 		Preload("Tags").
 		Where("(title ILIKE ? OR body ILIKE ?) AND published = ?", likePattern, likePattern, true).
 		Order("created_at DESC").
@@ -374,7 +374,7 @@ func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit in
 
 	// Get paginated records
 	err = r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("Creator").
+		Preload("User").
 		Preload("Tags").
 		Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
 		Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
@@ -406,7 +406,7 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 
 	// Build the base query
 	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("Creator").
+		Preload("User").
 		Preload("Tags")
 
 	// Apply search filter

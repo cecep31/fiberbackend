@@ -18,8 +18,8 @@ type PostComment struct {
 	CreatedBy        *string        `json:"created_by" gorm:"type:uuid"`
 
 	// Relationships
-	Creator *User `gorm:"foreignKey:CreatedBy" json:"creator,omitempty"`
-	Posts   *Post `gorm:"foreignKey:PostID" json:"posts,omitempty"`
+	User  *User `gorm:"foreignKey:CreatedBy" json:"creator,omitempty"`
+	Posts *Post `gorm:"foreignKey:PostID" json:"posts,omitempty"`
 }
 
 func (PostComment) TableName() string {
@@ -30,22 +30,22 @@ type PostCommentResponse struct {
 	ID        string        `json:"id"`
 	PostID    string        `json:"post_id"`
 	Text      *string       `json:"text"`
-	Creator   *UserResponse `json:"creator,omitempty"`
+	User      *UserResponse `json:"creator,omitempty"`
 	CreatedAt *time.Time    `json:"created_at"`
 	UpdatedAt *time.Time    `json:"updated_at"`
 }
 
 func (pc *PostComment) ToResponse() *PostCommentResponse {
 	var creatorResp *UserResponse
-	if pc.Creator != nil && pc.Creator.ID != "" {
-		creatorResp = pc.Creator.ToResponse()
+	if pc.User != nil && pc.User.ID != "" {
+		creatorResp = pc.User.ToResponse()
 	}
 
 	return &PostCommentResponse{
 		ID:        pc.ID,
 		PostID:    pc.PostID,
 		Text:      pc.Text,
-		Creator:   creatorResp,
+		User:      creatorResp,
 		CreatedAt: pc.CreatedAt,
 		UpdatedAt: pc.UpdatedAt,
 	}

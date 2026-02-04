@@ -22,7 +22,7 @@ type Post struct {
 	PostComments  []PostComment  `gorm:"foreignKey:PostID"`
 	PostLikes     []PostLike     `gorm:"foreignKey:PostID"`
 	PostBookmarks []PostBookmark `gorm:"foreignKey:PostID"`
-	Creator       *User          `gorm:"foreignKey:CreatedBy"`
+	User          *User          `gorm:"foreignKey:CreatedBy"`
 	Tags          []Tag          `gorm:"many2many:posts_to_tags;"`
 }
 
@@ -48,8 +48,8 @@ type PostResponse struct {
 
 func (p *Post) ToResponse() *PostResponse {
 	var creatorResp *UserResponse
-	if p.Creator.ID != "" {
-		creatorResp = p.Creator.ToResponse()
+	if p.User.ID != "" {
+		creatorResp = p.User.ToResponse()
 	}
 
 	var tagResponses []TagResponse

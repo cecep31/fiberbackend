@@ -16,7 +16,7 @@ type Comment struct {
 
 	// Optional: Define relationships explicitly if needed
 	// Block     Block     `gorm:"foreignKey:BlockID"`
-	// Creator   User      `gorm:"foreignKey:CreatedBy"`
+	// User      User      `gorm:"foreignKey:CreatedBy"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
