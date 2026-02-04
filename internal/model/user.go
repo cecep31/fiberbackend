@@ -42,6 +42,29 @@ func (User) TableName() string {
 	return "users"
 }
 
+// UserSummary is a minimal user representation for nested use (e.g. post author, comment author).
+// Not the full UserResponse; avoids exposing email and full profile in lists/nested responses.
+type UserSummary struct {
+	ID       string  `json:"id"`
+	Username *string `json:"username"`
+	Image    *string `json:"image"`
+	Name     string  `json:"name"`
+}
+
+// ToSummary converts a User to the minimal summary response.
+func (u *User) ToSummary() *UserSummary {
+	name := ""
+	if u.FirstName != nil && u.LastName != nil {
+		name = *u.FirstName + " " + *u.LastName
+	}
+	return &UserSummary{
+		ID:       u.ID,
+		Username: u.Username,
+		Image:    u.Image,
+		Name:     name,
+	}
+}
+
 // UserResponse represents the user data that can be safely sent to clients
 type UserResponse struct {
 	ID             string     `json:"id"`

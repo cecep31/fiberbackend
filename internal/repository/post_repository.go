@@ -17,8 +17,8 @@ var (
 )
 
 type PostRepository interface {
-	CreatePost(ctx context.Context, post *model.CreatePostDTO, creator_id string) (*model.Post, error)
-	CreatePostWithTags(ctx context.Context, post *model.CreatePostDTO, creator_id string, tags []model.Tag) (*model.Post, error)
+	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
+	CreatePostWithTags(ctx context.Context, post *model.CreatePostDTO, userID string, tags []model.Tag) (*model.Post, error)
 	GetPosts(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error)
 	GetPostsFiltered(ctx context.Context, filter *model.PostQueryFilter) ([]*model.Post, int64, error)
 	GetPostByUsername(ctx context.Context, username string, offset int, limit int) ([]*model.Post, int64, error)
@@ -123,12 +123,12 @@ func (r *postRepository) UpdatePost(ctx context.Context, id string, postDTO *mod
 	return &updatedPost, nil
 }
 
-func (r *postRepository) CreatePost(ctx context.Context, postDTO *model.CreatePostDTO, creator_id string) (*model.Post, error) {
+func (r *postRepository) CreatePost(ctx context.Context, postDTO *model.CreatePostDTO, userID string) (*model.Post, error) {
 	newpost := &model.Post{
 		Title:     &postDTO.Title,
 		Slug:      &postDTO.Slug,
 		Body:      &postDTO.Body,
-		CreatedBy: &creator_id,
+		CreatedBy: &userID,
 		Photo_url: &postDTO.Photo_url,
 		Published: &postDTO.Published,
 	}
@@ -140,12 +140,12 @@ func (r *postRepository) CreatePost(ctx context.Context, postDTO *model.CreatePo
 	return newpost, nil // Returning the instance passed to Create. ID should be populated.
 }
 
-func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.CreatePostDTO, creator_id string, tags []model.Tag) (*model.Post, error) {
+func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.CreatePostDTO, userID string, tags []model.Tag) (*model.Post, error) {
 	newpost := &model.Post{
 		Title:     &postDTO.Title,
 		Slug:      &postDTO.Slug,
 		Body:      &postDTO.Body,
-		CreatedBy: &creator_id,
+		CreatedBy: &userID,
 		Photo_url: &postDTO.Photo_url,
 		Published: &postDTO.Published,
 		Tags:      tags, // Associate tags with the post
@@ -189,7 +189,7 @@ func (r *postRepository) GetPostByUsername(ctx context.Context, username string,
 	// For Preload("User"), GORM uses the defined foreign keys.
 	// The explicit Join above is mainly for the WHERE clause on users.username.
 	err = r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User"). // GORM will fetch Creator based on associations
+		Preload("User"). // GORM will fetch User based on associations
 		Preload("Tags").
 		Joins("JOIN users ON users.id = posts.created_by"). // Keep join for filtering
 		Where("users.username = ?", username).
@@ -260,9 +260,9 @@ func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug stri
 		}
 		return nil, fmt.Errorf("failed to get post by slug '%s' and username '%s': %w", slug, username, err)
 	}
-	// The JOIN and WHERE clause should ensure post.Creator.Username matches,
-	// but an explicit check after loading can be added for extra safety if Creator is preloaded.
-	// if post.Creator == nil || post.Creator.Username != username {
+	// The JOIN and WHERE clause should ensure post.User.Username matches,
+	// but an explicit check after loading can be added for extra safety if User is preloaded.
+	// if post.User == nil || post.User.Username != username {
 	//  return nil, ErrPostNotFound // Should not happen if JOIN is correct
 	// }
 	return &post, nil
@@ -308,7 +308,7 @@ func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy stri
 	// Assuming model.Post has a 'CreatedBy' field that stores the user ID.
 	err := r.db.WithContext(ctx).Model(&model.Post{}).Where("created_by = ?", createdBy).Count(&count).Error
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts by creator ID %s: %w", createdBy, err)
+		return nil, 0, fmt.Errorf("failed to count posts by user ID %s: %w", createdBy, err)
 	}
 
 	// Get paginated records
@@ -321,7 +321,7 @@ func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy stri
 		Limit(limit).
 		Find(&posts).Error
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get posts by creator ID %s: %w", createdBy, err)
+		return nil, 0, fmt.Errorf("failed to get posts by user ID %s: %w", createdBy, err)
 	}
 	return posts, count, nil
 }

@@ -20,7 +20,7 @@ type PostService interface {
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.PostResponse, int64, error)
 	DeletePostByID(ctx context.Context, id string) error
 	UploadImagePosts(ctx context.Context, file *multipart.FileHeader) error
-	CreatePost(ctx context.Context, post *model.CreatePostDTO, creator_id string) (*model.Post, error)
+	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
 	UpdatePost(ctx context.Context, id string, post *model.UpdatePostDTO) (*model.Post, error)
 	IsAuthor(ctx context.Context, id string, userid string) error
 }
@@ -76,7 +76,7 @@ func (s *postService) GetPostsByUsername(ctx context.Context, username string, o
 	return postsResponse, total, nil
 }
 
-func (s *postService) CreatePost(ctx context.Context, post *model.CreatePostDTO, creator_id string) (*model.Post, error) {
+func (s *postService) CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error) {
 	// Handle tags if they exist
 	var tags []model.Tag
 	if len(post.Tags) > 0 {
@@ -95,7 +95,7 @@ func (s *postService) CreatePost(ctx context.Context, post *model.CreatePostDTO,
 	}
 
 	// Create the post with tags
-	return s.postRepo.CreatePostWithTags(ctx, post, creator_id, tags)
+	return s.postRepo.CreatePostWithTags(ctx, post, userID, tags)
 }
 
 func (s *postService) GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.PostResponse, error) {

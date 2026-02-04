@@ -39,7 +39,7 @@ type PostResponse struct {
 	ViewCount int64         `json:"view_count"`
 	LikeCount int64         `json:"like_count"`
 	Published *bool         `json:"published"`
-	Creator   *UserResponse `json:"creator,omitempty"`
+	User      *UserSummary  `json:"user,omitempty"`
 	Tags      []TagResponse `json:"tags,omitempty"`
 	CreatedAt *time.Time    `json:"created_at"`
 	UpdatedAt *time.Time    `json:"updated_at"`
@@ -47,9 +47,9 @@ type PostResponse struct {
 }
 
 func (p *Post) ToResponse() *PostResponse {
-	var creatorResp *UserResponse
-	if p.User.ID != "" {
-		creatorResp = p.User.ToResponse()
+	var userResp *UserSummary
+	if p.User != nil && p.User.ID != "" {
+		userResp = p.User.ToSummary()
 	}
 
 	var tagResponses []TagResponse
@@ -74,7 +74,7 @@ func (p *Post) ToResponse() *PostResponse {
 		ViewCount: p.ViewCount,
 		LikeCount: p.LikeCount,
 		Published: p.Published,
-		Creator:   creatorResp,
+		User:      userResp,
 		Tags:      tagResponses,
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
