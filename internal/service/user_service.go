@@ -24,7 +24,7 @@ func NewUserService(userRepo repository.UserRepository) UserService {
 func (s *userService) GetByID(ctx context.Context, id string) (*model.UserResponse, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user by id: %w", err)
 	}
 	return user.ToResponse(), nil
 }

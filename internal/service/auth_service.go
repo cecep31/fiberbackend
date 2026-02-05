@@ -63,12 +63,12 @@ func (s *authService) Register(ctx context.Context, email, username, password st
 		return nil, ErrUserExists
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to check username availability: %w", err)
 	}
 
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
 	hashedPassword := string(hashedPasswordBytes)
@@ -80,7 +80,7 @@ func (s *authService) Register(ctx context.Context, email, username, password st
 	}
 
 	if err := s.authRepo.CreateUser(ctx, newUser); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
 	return newUser, nil
@@ -122,7 +122,7 @@ func (s *authService) Login(ctx context.Context, email, password string) (string
 	// Generate secure refresh token
 	refreshBytes := make([]byte, 64)
 	if _, err := rand.Read(refreshBytes); err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 	refreshToken := "pl_" + base64.RawURLEncoding.EncodeToString(refreshBytes)
 
@@ -132,7 +132,7 @@ func (s *authService) Login(ctx context.Context, email, password string) (string
 		UserID:       user.ID,
 	}
 	if err := s.sessionRepo.CreateSession(ctx, sess); err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
 	return tokenString, refreshToken, user, nil
@@ -198,7 +198,7 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (st
 	// Get user information
 	user, err := s.userRepo.GetByID(ctx, session.UserID)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to get user for token refresh: %w", err)
 	}
 
 	// Generate new JWT token
@@ -214,13 +214,13 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (st
 
 	tokenString, err := token.SignedString(s.jwtSecret)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to sign token: %w", err)
 	}
 
 	// Generate new refresh token and update session
 	newRefreshBytes := make([]byte, 64)
 	if _, err := rand.Read(newRefreshBytes); err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to generate new refresh token: %w", err)
 	}
 	newRefreshToken := "pl_" + base64.RawURLEncoding.EncodeToString(newRefreshBytes)
 
@@ -228,7 +228,7 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (st
 	session.RefreshToken = newRefreshToken
 	session.CreatedAt = &time.Time{}
 	if err := s.sessionRepo.UpdateSession(ctx, session); err != nil {
-		return "", "", nil, err
+		return "", "", nil, fmt.Errorf("failed to update session: %w", err)
 	}
 
 	return tokenString, newRefreshToken, user, nil
@@ -252,13 +252,16 @@ func (s *authService) ChangePassword(ctx context.Context, userID, currentPasswor
 	// Hash new password
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to hash new password: %w", err)
 	}
 	hashedPassword := string(hashedPasswordBytes)
 
 	// Update password
 	user.Password = &hashedPassword
-	return s.userRepo.Update(ctx, user)
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+	return nil
 }
 
 // Helper functions

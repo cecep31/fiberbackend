@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
@@ -38,7 +40,7 @@ func (r *commentRepository) GetCommentsByPostID(ctx context.Context, postID stri
 		Where("post_id = ?", postID).
 		Order("created_at DESC").
 		Find(&comments).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get comments by post id: %w", err)
 	}
 
 	return comments, nil
@@ -51,7 +53,7 @@ func (r *commentRepository) GetCommentByID(ctx context.Context, id string) (*mod
 		Preload("Posts").
 		Where("id = ?", id).
 		First(&comment).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get comment by id: %w", err)
 	}
 	return &comment, nil
 }

@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
@@ -40,7 +42,7 @@ func (r *postLikeRepository) GetLikesByPostID(ctx context.Context, postID string
 
 	// Count total likes
 	if err := r.db.WithContext(ctx).Model(&model.PostLike{}).Where("post_id = ?", postID).Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to count likes: %w", err)
 	}
 
 	// Get paginated likes with user information
@@ -66,7 +68,7 @@ func (r *postLikeRepository) GetLikeStats(ctx context.Context, postID string) (*
 		Count(&stats.TotalLikes).Error
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get like stats: %w", err)
 	}
 
 	return &stats, nil

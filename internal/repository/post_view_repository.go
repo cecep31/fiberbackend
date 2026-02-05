@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
@@ -34,7 +36,7 @@ func (r *postViewRepository) GetViewsByPostID(ctx context.Context, postID string
 
 	// Count total views
 	if err := r.db.WithContext(ctx).Model(&model.PostView{}).Where("post_id = ?", postID).Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to count views: %w", err)
 	}
 
 	// Get paginated views with user information
@@ -45,8 +47,11 @@ func (r *postViewRepository) GetViewsByPostID(ctx context.Context, postID string
 		Limit(limit).
 		Offset(offset).
 		Find(&views).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get views by post id: %w", err)
+	}
 
-	return views, total, err
+	return views, total, nil
 }
 
 func (r *postViewRepository) GetViewStats(ctx context.Context, postID string) (*model.PostViewStats, error) {
@@ -54,7 +59,7 @@ func (r *postViewRepository) GetViewStats(ctx context.Context, postID string) (*
 
 	// Total views
 	if err := r.db.WithContext(ctx).Model(&model.PostView{}).Where("post_id = ?", postID).Count(&stats.TotalViews).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to count total views: %w", err)
 	}
 
 	// Unique views (distinct user_id where user_id is not null)
@@ -62,21 +67,21 @@ func (r *postViewRepository) GetViewStats(ctx context.Context, postID string) (*
 		Where("post_id = ? AND user_id IS NOT NULL", postID).
 		Distinct("user_id").
 		Count(&stats.UniqueViews).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to count unique views: %w", err)
 	}
 
 	// Anonymous views
 	if err := r.db.WithContext(ctx).Model(&model.PostView{}).
 		Where("post_id = ? AND user_id IS NULL", postID).
 		Count(&stats.AnonymousViews).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to count anonymous views: %w", err)
 	}
 
 	// Authenticated views
 	if err := r.db.WithContext(ctx).Model(&model.PostView{}).
 		Where("post_id = ? AND user_id IS NOT NULL", postID).
 		Count(&stats.AuthenticatedViews).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to count authenticated views: %w", err)
 	}
 
 	return stats, nil
@@ -87,7 +92,10 @@ func (r *postViewRepository) HasUserViewedPost(ctx context.Context, postID, user
 	err := r.db.WithContext(ctx).Model(&model.PostView{}).
 		Where("post_id = ? AND user_id = ?", postID, userID).
 		Count(&count).Error
-	return count > 0, err
+	if err != nil {
+		return false, fmt.Errorf("failed to check if user viewed post: %w", err)
+	}
+	return count > 0, nil
 }
 
 func (r *postViewRepository) GetViewByUserAndPost(ctx context.Context, postID, userID string) (*model.PostView, error) {
@@ -95,7 +103,10 @@ func (r *postViewRepository) GetViewByUserAndPost(ctx context.Context, postID, u
 	err := r.db.WithContext(ctx).
 		Where("post_id = ? AND user_id = ?", postID, userID).
 		First(&view).Error
-	return &view, err
+	if err != nil {
+		return nil, fmt.Errorf("failed to get view by user and post: %w", err)
+	}
+	return &view, nil
 }
 
 func (r *postViewRepository) IncrementPostViewCount(ctx context.Context, postID string) error {

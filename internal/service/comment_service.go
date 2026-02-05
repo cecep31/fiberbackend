@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 )
@@ -42,7 +44,7 @@ func (s *commentService) CreateComment(ctx context.Context, postID string, dto *
 	}
 
 	if err := s.commentRepo.CreateComment(ctx, comment); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create comment: %w", err)
 	}
 
 	return comment, nil
@@ -57,7 +59,7 @@ func (s *commentService) GetCommentsByPostID(ctx context.Context, postID string)
 
 	comments, err := s.commentRepo.GetCommentsByPostID(ctx, postID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get comments by post id: %w", err)
 	}
 
 	responses := make([]*model.PostCommentResponse, len(comments))
@@ -71,7 +73,7 @@ func (s *commentService) GetCommentsByPostID(ctx context.Context, postID string)
 func (s *commentService) GetCommentByID(ctx context.Context, id string) (*model.PostCommentResponse, error) {
 	comment, err := s.commentRepo.GetCommentByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get comment by id: %w", err)
 	}
 	return comment.ToResponse(), nil
 }
@@ -79,7 +81,7 @@ func (s *commentService) GetCommentByID(ctx context.Context, id string) (*model.
 func (s *commentService) UpdateComment(ctx context.Context, id string, text string, userID string) (*model.PostComment, error) {
 	comment, err := s.commentRepo.GetCommentByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get comment for update: %w", err)
 	}
 
 	if comment.CreatedBy != &userID {
@@ -88,7 +90,7 @@ func (s *commentService) UpdateComment(ctx context.Context, id string, text stri
 
 	comment.Text = &text
 	if err := s.commentRepo.UpdateComment(ctx, comment); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to update comment: %w", err)
 	}
 
 	return comment, nil
@@ -97,20 +99,23 @@ func (s *commentService) UpdateComment(ctx context.Context, id string, text stri
 func (s *commentService) DeleteComment(ctx context.Context, id string, userID string) error {
 	comment, err := s.commentRepo.GetCommentByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get comment for deletion: %w", err)
 	}
 
 	if comment.CreatedBy != &userID {
 		return errors.New("not authorized to delete this comment")
 	}
 
-	return s.commentRepo.DeleteComment(ctx, id)
+	if err := s.commentRepo.DeleteComment(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete comment: %w", err)
+	}
+	return nil
 }
 
 func (s *commentService) IsCommentAuthor(ctx context.Context, commentID string, userID string) error {
 	comment, err := s.commentRepo.GetCommentByID(ctx, commentID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get comment for author check: %w", err)
 	}
 	if comment.CreatedBy != &userID {
 		return errors.New("not author")

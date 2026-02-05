@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
@@ -35,7 +36,7 @@ func (s *chatConversationService) CreateConversation(ctx context.Context, userID
 
 	createdConversation, err := s.conversationRepo.CreateConversation(ctx, chatConversation)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create conversation: %w", err)
 	}
 
 	return createdConversation.ToResponse(), nil
@@ -44,7 +45,7 @@ func (s *chatConversationService) CreateConversation(ctx context.Context, userID
 func (s *chatConversationService) GetConversationByID(ctx context.Context, id string, userID string) (*model.ChatConversationResponse, error) {
 	conversation, err := s.conversationRepo.GetConversationByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get conversation by id: %w", err)
 	}
 
 	// Check if the conversation belongs to the user
@@ -58,7 +59,7 @@ func (s *chatConversationService) GetConversationByID(ctx context.Context, id st
 func (s *chatConversationService) GetUserConversations(ctx context.Context, userID string, offset int, limit int) ([]*model.ChatConversationResponse, int64, error) {
 	conversations, total, err := s.conversationRepo.GetUserConversations(ctx, userID, offset, limit)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to get user conversations: %w", err)
 	}
 
 	// Convert to response format
@@ -74,7 +75,7 @@ func (s *chatConversationService) UpdateConversation(ctx context.Context, id str
 	// First, verify that the conversation belongs to the user
 	existingConversation, err := s.conversationRepo.GetConversationByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get conversation for update: %w", err)
 	}
 
 	if existingConversation.UserID != userID {
@@ -83,7 +84,7 @@ func (s *chatConversationService) UpdateConversation(ctx context.Context, id str
 
 	updatedConversation, err := s.conversationRepo.UpdateConversation(ctx, id, conversation)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to update conversation: %w", err)
 	}
 
 	return updatedConversation.ToResponse(), nil
@@ -93,12 +94,15 @@ func (s *chatConversationService) DeleteConversation(ctx context.Context, id str
 	// First, verify that the conversation belongs to the user
 	existingConversation, err := s.conversationRepo.GetConversationByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get conversation for deletion: %w", err)
 	}
 
 	if existingConversation.UserID != userID {
 		return errors.New("access denied: conversation does not belong to user")
 	}
 
-	return s.conversationRepo.DeleteConversation(ctx, id)
+	if err := s.conversationRepo.DeleteConversation(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete conversation: %w", err)
+	}
+	return nil
 }

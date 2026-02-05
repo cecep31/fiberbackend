@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 	"time"
@@ -51,7 +53,7 @@ func (s *holdingService) Create(ctx context.Context, userID string, dto *model.C
 	}
 	created, err := s.repo.Create(ctx, h)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create holding: %w", err)
 	}
 	return created.ToResponse(), nil
 }
@@ -59,7 +61,7 @@ func (s *holdingService) Create(ctx context.Context, userID string, dto *model.C
 func (s *holdingService) GetByID(ctx context.Context, id int64, userID string) (*model.HoldingResponse, error) {
 	h, err := s.repo.GetByIDAndUserID(ctx, id, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get holding by id: %w", err)
 	}
 	return h.ToResponse(), nil
 }
@@ -79,7 +81,7 @@ func (s *holdingService) ListByUserID(ctx context.Context, userID string, filter
 func (s *holdingService) Update(ctx context.Context, id int64, userID string, dto *model.UpdateHoldingDTO) (*model.HoldingResponse, error) {
 	h, err := s.repo.Update(ctx, id, userID, dto)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to update holding: %w", err)
 	}
 	return h.ToResponse(), nil
 }

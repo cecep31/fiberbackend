@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fiberbackend/config"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -50,11 +51,14 @@ func (s *S3Storage) Save(ctx context.Context, path string, file io.Reader) error
 	// For larger files, consider using a streaming approach with known size
 	data, err := io.ReadAll(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read file data: %w", err)
 	}
 
 	_, err = s.client.PutObject(ctx, s.bucket, path, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to put object to s3: %w", err)
+	}
+	return nil
 }
 
 func (s *S3Storage) Get(ctx context.Context, path string) (io.ReadCloser, error) {
@@ -65,7 +69,7 @@ func (s *S3Storage) Get(ctx context.Context, path string) (io.ReadCloser, error)
 	object, err := s.client.GetObject(ctx, s.bucket, path, minio.GetObjectOptions{})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, fmt.Errorf("failed to get object from s3: %w", err)
 	}
 
 	// Return a wrapper that will cancel the context when closed
@@ -89,5 +93,8 @@ type readCloserWithCancel struct {
 func (r *readCloserWithCancel) Close() error {
 	err := r.ReadCloser.Close()
 	r.cancel() // Cancel the context when closing
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to close read closer: %w", err)
+	}
+	return nil
 }

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 	"fiberbackend/pkg/storage"
@@ -41,7 +43,7 @@ func NewPostService(postRepo repository.PostRepository, tagService TagService, s
 func (s *postService) IsAuthor(ctx context.Context, id string, userid string) error {
 	post, err := s.postRepo.GetPostByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get post for author check: %w", err)
 	}
 	if post.CreatedBy == nil || *post.CreatedBy != userid {
 		return ErrNotAuthor
@@ -88,20 +90,24 @@ func (s *postService) CreatePost(ctx context.Context, post *model.CreatePostDTO,
 			// Try to find existing tag by name
 			tag, err := s.findOrCreateTagByName(ctx, tagName)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to find or create tag '%s': %w", tagName, err)
 			}
 			tags = append(tags, *tag)
 		}
 	}
 
 	// Create the post with tags
-	return s.postRepo.CreatePostWithTags(ctx, post, userID, tags)
+	createdPost, err := s.postRepo.CreatePostWithTags(ctx, post, userID, tags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create post with tags: %w", err)
+	}
+	return createdPost, nil
 }
 
 func (s *postService) GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.PostResponse, error) {
 	post, err := s.postRepo.GetPostBySlugAndUsername(ctx, slug, username)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get post by slug and username: %w", err)
 	}
 
 	return post.ToResponse(), nil
@@ -118,7 +124,7 @@ func (s *postService) UpdatePost(ctx context.Context, id string, post *model.Upd
 func (s *postService) GetPostByID(ctx context.Context, id string) (*model.PostResponse, error) {
 	post, err := s.postRepo.GetPostByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get post by id: %w", err)
 	}
 
 	return post.ToResponse(), nil
@@ -157,7 +163,7 @@ func (s *postService) GetPostsRandom(ctx context.Context, limit int) ([]*model.P
 
 	posts, err := s.postRepo.GetPostsRandom(ctx, limit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get random posts: %w", err)
 	}
 
 	// Pre-allocate slice with known capacity to reduce memory allocations
@@ -259,7 +265,7 @@ func (s *postService) UploadImagePosts(ctx context.Context, file *multipart.File
 
 	src, err := file.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open uploaded file: %w", err)
 	}
 	defer src.Close()
 

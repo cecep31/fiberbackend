@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 )
@@ -66,7 +68,7 @@ func (s *tagService) FindOrCreateByName(ctx context.Context, name string) (*mode
 
 	err = s.tagRepo.Create(ctx, newTag)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create tag: %w", err)
 	}
 
 	return newTag, nil
@@ -75,7 +77,10 @@ func (s *tagService) FindOrCreateByName(ctx context.Context, name string) (*mode
 func (s *tagService) DeleteTag(ctx context.Context, id uint) error {
 	_, err := s.tagRepo.FindByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to find tag for deletion: %w", err)
 	}
-	return s.tagRepo.Delete(ctx, id)
+	if err := s.tagRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete tag: %w", err)
+	}
+	return nil
 }

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 )
@@ -48,7 +50,7 @@ func (s *userFollowService) FollowUser(ctx context.Context, followerID, followin
 	// Follow the user
 	err = s.userFollowRepo.Follow(ctx, followerID, followingID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to follow user: %w", err)
 	}
 
 	return &model.FollowResponse{
@@ -61,7 +63,7 @@ func (s *userFollowService) UnfollowUser(ctx context.Context, followerID, follow
 	// Unfollow the user
 	err := s.userFollowRepo.Unfollow(ctx, followerID, followingID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unfollow user: %w", err)
 	}
 
 	return &model.FollowResponse{
@@ -77,7 +79,7 @@ func (s *userFollowService) IsFollowing(ctx context.Context, followerID, followi
 func (s *userFollowService) GetFollowers(ctx context.Context, userID string, limit, offset int) ([]*model.UserResponse, int64, error) {
 	users, total, err := s.userFollowRepo.GetFollowers(ctx, userID, limit, offset)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to get followers: %w", err)
 	}
 
 	// Convert to response format
@@ -92,7 +94,7 @@ func (s *userFollowService) GetFollowers(ctx context.Context, userID string, lim
 func (s *userFollowService) GetFollowing(ctx context.Context, userID string, limit, offset int) ([]*model.UserResponse, int64, error) {
 	users, total, err := s.userFollowRepo.GetFollowing(ctx, userID, limit, offset)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to get following: %w", err)
 	}
 
 	// Convert to response format
@@ -111,7 +113,7 @@ func (s *userFollowService) GetFollowStats(ctx context.Context, userID string) (
 func (s *userFollowService) GetMutualFollows(ctx context.Context, userID1, userID2 string) ([]*model.UserResponse, error) {
 	users, err := s.userFollowRepo.GetMutualFollows(ctx, userID1, userID2)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get mutual follows: %w", err)
 	}
 
 	// Convert to response format
@@ -127,7 +129,7 @@ func (s *userFollowService) GetUserWithFollowStatus(ctx context.Context, userID,
 	// Get user
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	userResponse := user.ToResponse()
@@ -136,7 +138,7 @@ func (s *userFollowService) GetUserWithFollowStatus(ctx context.Context, userID,
 	if currentUserID != "" && currentUserID != userID {
 		isFollowing, err := s.userFollowRepo.IsFollowing(ctx, currentUserID, userID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to check follow status: %w", err)
 		}
 		userResponse.IsFollowing = &isFollowing
 	}

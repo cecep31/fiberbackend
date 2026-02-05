@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"fiberbackend/internal/model"
 
@@ -33,7 +34,7 @@ func (r *sessionRepository) CreateSession(ctx context.Context, s *model.Session)
 func (r *sessionRepository) GetByRefreshToken(ctx context.Context, token string) (*model.Session, error) {
 	var sess model.Session
 	if err := r.db.WithContext(ctx).Where("refresh_token = ?", token).First(&sess).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get session by refresh token: %w", err)
 	}
 	return &sess, nil
 }
@@ -41,7 +42,7 @@ func (r *sessionRepository) GetByRefreshToken(ctx context.Context, token string)
 func (r *sessionRepository) GetSessionByRefreshToken(ctx context.Context, token string) (*model.Session, error) {
 	var sess model.Session
 	if err := r.db.WithContext(ctx).Where("refresh_token = ?", token).First(&sess).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get session by refresh token: %w", err)
 	}
 	return &sess, nil
 }
