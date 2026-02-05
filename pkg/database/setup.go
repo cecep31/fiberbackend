@@ -95,12 +95,13 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := sqlDB.PingContext(ctx); err != nil {
+			cancel()
 			log.Printf("Failed to ping database (attempt %d/%d): %v", attempt+1, maxRetries, err)
 			sqlDB.Close()
 			continue
 		}
+		cancel()
 
 		// Connection successful
 		log.Printf("Successfully connected to database")
