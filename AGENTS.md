@@ -1,10 +1,6 @@
 # AGENTS.md - Agent Guidelines for FiberBackend
 
-This document provides guidelines for AI agents working on the FiberBackend Go project.
-
-## Project Overview
-
-FiberBackend is a REST API built with Go 1.25+, Fiber v3 framework, PostgreSQL, and GORM. It follows clean architecture with handler/service/repository layers and uses Uber's dig for dependency injection.
+REST API built with Go 1.25+, Fiber v3, PostgreSQL, and GORM. Clean architecture with handler/service/repository layers using Uber's dig for dependency injection.
 
 ## Build/Lint/Test Commands
 
@@ -17,7 +13,7 @@ air                              # Hot reload development
 go run cmd/main.go              # Direct run
 
 # Lint
-golangci-lint run               # Run all configured linters
+golangci-lint run               # Run all linters (see .golangci.yml)
 gofmt -l .                      # Check formatting
 go vet ./...                    # Vet all packages
 
@@ -28,69 +24,52 @@ go test -run TestIsValidEmail   # Run single test by name
 go test -v ./...                # Verbose output
 
 # Dependencies
-go mod download
-go mod tidy
-go mod verify
+go mod download && go mod tidy && go mod verify
 ```
 
 ## Code Style Guidelines
 
 ### Imports
 
-Group imports in this order (separated by blank lines):
-1. Standard library imports
-2. Local project imports (`fiberbackend/...`)
-3. Third-party imports
+Group imports: 1) Standard library 2) Local (`fiberbackend/...`) 3) Third-party. Separate groups with blank lines.
 
-Example:
 ```go
 import (
 	"context"
-	"net/http"
 
 	"fiberbackend/internal/model"
 	"fiberbackend/pkg/response"
 
 	"github.com/gofiber/fiber/v3"
-	"gorm.io/gorm"
 )
 ```
 
 ### Formatting
 
-- Use `gofmt` for automatic formatting
-- Maximum line length: 140 characters (per .golangci.yml)
-- Use tabs for indentation
+- Use `gofmt` for formatting
+- Max line length: 140 characters
+- Tabs for indentation
 - No trailing whitespace
 
 ### Naming Conventions
 
-- **Packages**: lowercase, single word (e.g., `handler`, `service`, `repository`)
-- **Exported identifiers**: PascalCase (e.g., `UserService`, `GetByID`)
-- **Unexported identifiers**: camelCase (e.g., `userRepo`, `validateInput`)
-- **Interfaces**: Noun describing capability, often ending in "-er" (e.g., `UserService`, `Repository`)
-- **Structs**: Nouns, exported if used outside package
-- **Methods**: Verbs or verb phrases
-- **Constants**: PascalCase for exported, camelCase for unexported
-- **Test files**: `*_test.go`, test functions: `TestXxx`, `BenchmarkXxx`
-- **Database fields**: snake_case in struct tags (e.g., `json:"first_name"`)
-- **JSON keys**: snake_case (e.g., `created_at`, `user_id`)
+- **Packages**: lowercase, single word (e.g., `handler`, `service`)
+- **Exported**: PascalCase (e.g., `UserService`, `GetByID`)
+- **Unexported**: camelCase (e.g., `userRepo`)
+- **Interfaces**: Noun ending in "-er" (e.g., `UserService`)
+- **Constants**: PascalCase for exported
+- **Test files**: `*_test.go`, functions: `TestXxx`
+- **JSON/DB fields**: snake_case (e.g., `first_name`, `created_at`)
 
 ### Types and Structs
 
-- Define interfaces in the consumer package (usually service or handler)
-- Keep struct fields ordered: ID, timestamps, other fields, relationships
-- Use pointer types for nullable database fields
-- Add struct tags for JSON and GORM
-- Document exported types with comments starting with the type name
+Define interfaces in consumer package. Order fields: ID, timestamps, other fields, relationships. Use pointers for nullable DB fields. Document exported types.
 
-Example:
 ```go
 // User represents the user model in the database
 type User struct {
 	ID        string         `json:"id" gorm:"type:uuid;primaryKey"`
 	CreatedAt *time.Time     `json:"created_at"`
-	UpdatedAt *time.Time     `json:"updated_at"`
 	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
 	Profile   *Profile       `gorm:"foreignKey:UserID"`
 }
@@ -98,67 +77,39 @@ type User struct {
 
 ### Error Handling
 
-- Use the custom `AppError` type from `pkg/utils/errors.go` for application errors
-- Wrap errors with context using `fmt.Errorf("...: %w", err)`
-- Return early on errors to reduce nesting
-- Check sentinel errors with `errors.Is()` (e.g., `err == service.ErrUserExists`)
-- Use `errors.As()` for error type assertions
-- HTTP handlers should use response helpers from `pkg/response/`
-
-Example:
-```go
-func (s *userService) GetByID(ctx context.Context, id string) (*model.UserResponse, error) {
-	user, err := s.userRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve user: %w", err)
-	}
-	return user.ToResponse(), nil
-}
-```
+Use `AppError` from `pkg/utils/errors.go`. Wrap with `fmt.Errorf("...: %w", err)`. Return early on errors. Check sentinel errors with `errors.Is()`. HTTP handlers use `pkg/response/` helpers.
 
 ### Response Patterns
 
-Use standardized response helpers in handlers:
+Use standardized helpers in handlers:
 - `response.Success(c, message, data)` - 200 OK
 - `response.Created(c, message, data)` - 201 Created
-- `response.BadRequest(c, message, err)` - 400 Bad Request
-- `response.Unauthorized(c, message)` - 401 Unauthorized
-- `response.Forbidden(c, message)` - 403 Forbidden
-- `response.NotFound(c, message, err)` - 404 Not Found
-- `response.InternalServerError(c, message, err)` - 500 Internal Server Error
-- `response.HandleBindError(c, err)` - Handle validation errors
+- `response.BadRequest(c, message, err)` - 400
+- `response.Unauthorized(c, message)` - 401
+- `response.Forbidden(c, message)` - 403
+- `response.NotFound(c, message, err)` - 404
+- `response.InternalServerError(c, message, err)` - 500
+- `response.HandleBindError(c, err)` - Validation errors
 
-### Architecture Patterns
+### Architecture
 
 **Layer order**: Handler → Service → Repository → Model
 
-- **Handler**: HTTP request handling, input validation, response formatting
-- **Service**: Business logic, orchestration, transaction coordination
-- **Repository**: Data access, database queries, GORM operations
-- **Model**: Struct definitions, database tags, conversion methods (ToResponse, ToSummary)
+- **Handler**: HTTP handling, input validation, responses
+- **Service**: Business logic, orchestration, transactions
+- **Repository**: Data access, GORM queries
+- **Model**: Structs, DB tags, conversion methods (`ToResponse`, `ToSummary`)
 
-**Dependency Injection**: 
-- Use Uber's `dig` container (see `internal/di/container.go`)
-- Register providers in order: Config → Database → Repositories → Services → Handlers → Routes
-- Constructor injection: `func NewXxxService(repo Repository) Service`
+**Dependency Injection**: Use Uber's `dig` container (`internal/di/container.go`). Register: Config → Database → Repositories → Services → Handlers → Routes.
 
 ### Comments
 
-- All exported identifiers must have a comment starting with the identifier name
-- Use complete sentences with proper punctuation
-- Document the "why" not just the "what"
-- Add package documentation in a `doc.go` file or at the top of the main package file
+All exported identifiers need comments starting with the identifier name. Use complete sentences. Document the "why", not just "what".
 
 ### Testing
 
-- Test files in same package as code being tested or `*_test` package
-- Use table-driven tests for multiple test cases
-- Use `testify/assert` or `testify/require` for assertions
-- Mock external dependencies at repository level
-- Test function naming: `Test<FunctionName>` or `Test<Struct>_<Method>`
-- Skip test boilerplate rules with `//nolint` if necessary
+Table-driven tests with `testify/assert` or `testify/require`. Mock at repository level. Name tests: `Test<FunctionName>` or `Test<Struct>_<Method>`.
 
-Example:
 ```go
 func TestIsValidEmail(t *testing.T) {
 	tests := []struct {
@@ -167,7 +118,6 @@ func TestIsValidEmail(t *testing.T) {
 		want  bool
 	}{
 		{name: "Valid email", email: "test@example.com", want: true},
-		{name: "Invalid email", email: "invalid", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -181,11 +131,8 @@ func TestIsValidEmail(t *testing.T) {
 
 ### Validation
 
-- Use `go-playground/validator` tags on struct fields
-- Define request structs with validation tags in handlers
-- Use `response.HandleBindError()` to return validation errors
+Use `go-playground/validator` tags. Define request structs in handlers.
 
-Example:
 ```go
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
@@ -195,17 +142,14 @@ type LoginRequest struct {
 
 ### Configuration
 
-- Use `config/config.go` for all configuration
-- Environment variables with defaults
-- Required validation in `validate()` method
-- Never commit secrets; use `.env` file (already in `.gitignore`)
+Use `config/config.go`. Environment variables with defaults. Required validation in `validate()` method. Never commit secrets; `.env` is in `.gitignore`.
 
 ## Key Files
 
-- `cmd/main.go` - Application entry point
-- `config/config.go` - Configuration management
-- `internal/di/container.go` - Dependency injection setup
+- `cmd/main.go` - Entry point
+- `config/config.go` - Configuration
+- `internal/di/container.go` - DI container
 - `pkg/response/response.go` - HTTP response helpers
 - `pkg/utils/errors.go` - Application error types
-- `.golangci.yml` - Linter configuration
-- `.air.toml` - Hot reload configuration
+- `.golangci.yml` - Linter config
+- `.air.toml` - Hot reload config
