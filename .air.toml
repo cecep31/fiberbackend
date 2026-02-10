@@ -1,11 +1,15 @@
+# Air config: cross-platform (Linux, macOS, Windows). Same .air.toml for all.
 root = "."
 testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
   args_bin = []
-  entrypoint = "tmp/main"
-  cmd = "go build -o ./tmp/main cmd/main.go"
+  # Binary path works on all OSes (go build -o does not add .exe on Windows)
+  # entrypoint = "tmp/main"
+  entrypoint = "tmp/main.exe"
+  # cmd = "go build -o ./tmp/main cmd/main.go"
+  cmd = "go build -o ./tmp/main.exe cmd/main.go"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   exclude_file = []
