@@ -22,6 +22,8 @@ go test ./...                   # Run all tests
 go test ./pkg/utils/...         # Run tests in specific package
 go test -run TestIsValidEmail   # Run single test by name
 go test -v ./...                # Verbose output
+go test -cover ./...            # With coverage
+go test -short ./...            # Short mode (skip long-running tests)
 
 # Dependencies
 go mod download && go mod tidy && go mod verify
@@ -102,6 +104,17 @@ Use standardized helpers in handlers:
 
 **Dependency Injection**: Use Uber's `dig` container (`internal/di/container.go`). Register: Config → Database → Repositories → Services → Handlers → Routes.
 
+### Middleware
+
+Middleware is defined in `internal/middleware/`. Use ` fiber.Ctx` methods for request context. Auth middleware validates JWT tokens and sets user context. Apply middleware in routes using `app.Use()` or route-level with `config fiber.Config` in routes.
+
+### Database Migrations
+
+SQL migrations in `migrations/` folder. Apply manually via psql:
+```bash
+psql -d your_database -f migrations/001_*.sql
+```
+
 ### Comments
 
 All exported identifiers need comments starting with the identifier name. Use complete sentences. Document the "why", not just "what".
@@ -149,6 +162,8 @@ Use `config/config.go`. Environment variables with defaults. Required validation
 - `cmd/main.go` - Entry point
 - `config/config.go` - Configuration
 - `internal/di/container.go` - DI container
+- `internal/middleware/setup.go` - Middleware setup
+- `internal/routes/routes.go` - Route definitions
 - `pkg/response/response.go` - HTTP response helpers
 - `pkg/utils/errors.go` - Application error types
 - `.golangci.yml` - Linter config
