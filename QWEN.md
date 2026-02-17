@@ -2,17 +2,17 @@
 
 ## Project Overview
 
-FiberBackend is a modern REST API for a blog/content management system built with Go and the Fiber web framework. Despite the README incorrectly mentioning the Echo framework, the project actually uses the Fiber framework (v3.0.0) as evidenced in the go.mod file. The application connects to PostgreSQL for data persistence and includes features like user management, content management, social features, real-time chat, and file storage.
+FiberBackend is a modern REST API for a blog/content management system built with Go and the Fiber web framework. The application connects to PostgreSQL for data persistence and includes features like user management, content management, social features, real-time chat, and file storage.
 
 ### Key Technologies
 - **Go**: 1.25+
-- **Fiber Framework**: v3.0.0 (not Echo as incorrectly mentioned in README)
+- **Fiber Framework**: v3.0.0
 - **GORM**: v1.31.1 for database ORM
 - **PostgreSQL**: 14+ via pgx driver
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
 - **File Storage**: MinIO/S3 compatible storage
 - **Dependency Injection**: go.uber.org/dig
-- **Validation**: go-playground/validator
+- **Validation**: go-playground/validator/v10
 
 ### Architecture
 The project follows a clean architecture pattern with separation of concerns:
@@ -97,17 +97,25 @@ The project follows a clean architecture pattern with separation of concerns:
 ### Development Commands
 
 ```bash
-# Build and run
-make build
-make dev
+# Build
+CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/main cmd/main.go
+
+# Run with hot reload (using Air)
+air
+
+# Run directly
+go run cmd/main.go
 
 # Run tests
-make test
+go test ./...
+go test -v ./...           # Verbose output
+go test -cover ./...       # With coverage
+go test -short ./...       # Skip long-running tests
 
 # Code quality
-make fmt
-make vet
-make lint
+golangci-lint run          # Run all linters
+gofmt -l .                 # Check formatting
+go vet ./...               # Vet all packages
 ```
 
 ### Using Air for Hot Reload
@@ -166,31 +174,81 @@ Available API groups:
 
 ## Development Conventions
 
-- **Code Style**: Follows Go idiomatic conventions
-- **Testing**: Unit and integration tests using testify package
-- **Dependency Injection**: Uses Uber's dig for dependency injection
-- **Configuration**: Environment-based configuration with defaults
-- **Logging**: Structured logging with request ID correlation
-- **Error Handling**: Consistent error response format
-- **Security**: Built-in middleware for CORS, helmet, rate limiting, etc.
+### Code Style
+- **Imports**: Group imports: 1) Standard library 2) Local (`fiberbackend/...`) 3) Third-party
+- **Formatting**: Use `gofmt`, max line length 140 characters, tabs for indentation
+- **Naming**: Packages lowercase, exported PascalCase, unexported camelCase
+- **JSON/DB fields**: snake_case (e.g., `first_name`, `created_at`)
+
+### Architecture Patterns
+- **Layer order**: Handler → Service → Repository → Model
+- **Handler**: HTTP handling, input validation, responses
+- **Service**: Business logic, orchestration, transactions
+- **Repository**: Data access, GORM queries
+- **Model**: Structs, DB tags, conversion methods (`ToResponse`, `ToSummary`)
+
+### Dependency Injection
+Uses Uber's `dig` container (`internal/di/container.go`):
+- Registration order: Config → Database → Repositories → Services → Handlers → Routes
+- Cleanup manager handles resource cleanup on shutdown
+
+### Error Handling
+- Use `AppError` from `pkg/utils/errors.go`
+- Wrap errors with `fmt.Errorf("...: %w", err)`
+- Return early on errors
+- HTTP handlers use `pkg/response/` helpers
+
+### Response Patterns
+Standardized response helpers in handlers:
+- `response.Success(c, message, data)` - 200 OK
+- `response.Created(c, message, data)` - 201 Created
+- `response.BadRequest(c, message, err)` - 400
+- `response.Unauthorized(c, message)` - 401
+- `response.Forbidden(c, message)` - 403
+- `response.NotFound(c, message, err)` - 404
+- `response.InternalServerError(c, message, err)` - 500
+
+### Validation
+Uses `go-playground/validator` tags on request structs:
+```go
+type LoginRequest struct {
+    Email    string `json:"email" validate:"required,email"`
+    Password string `json:"password" validate:"required,min=6"`
+}
+```
+
+### Testing
+- Table-driven tests with `testify/assert` or `testify/require`
+- Mock at repository level
+- Test file naming: `*_test.go`, functions: `TestXxx`
+
+### Database Migrations
+SQL migrations in `migrations/` folder. Apply manually via psql:
+```bash
+psql -d your_database -f migrations/001_*.sql
+```
+
+## Important Files
+
+- `cmd/main.go` - Application entry point with graceful shutdown
+- `config/config.go` - Centralized configuration management
+- `internal/di/container.go` - Dependency injection container setup
+- `internal/routes/routes.go` - API route definitions
+- `internal/middleware/setup.go` - Security and utility middleware
+- `pkg/database/setup.go` - Database connection with retry logic
+- `pkg/response/response.go` - Standardized HTTP response helpers
+- `.air.toml` - Development hot reload configuration
+- `.golangci.yml` - Linter configuration
+- `Dockerfile` - Multi-stage Docker build
+- `fly.toml` - Fly.io deployment configuration
+- `AGENTS.md` - Development guidelines for AI agents
 
 ## Project Structure Notes
 
-The project correctly implements a layered architecture with clear separation between:
+The project implements a layered architecture with clear separation between:
 1. HTTP layer (handlers and routes)
 2. Business logic layer (services)
 3. Data access layer (repositories)
 4. Data models (models)
 
 The dependency injection system in the `internal/di` package manages the lifecycle of all services and ensures loose coupling between components.
-
-## Important Files
-
-- `cmd/main.go` - Application entry point with graceful shutdown
-- `config/config.go` - Centralized configuration management
-- `internal/routes/routes.go` - API route definitions
-- `internal/middleware/setup.go` - Security and utility middleware
-- `pkg/database/setup.go` - Database connection with retry logic
-- `.air.toml` - Development hot reload configuration
-- `Dockerfile` - Multi-stage Docker build
-- `fly.toml` - Fly.io deployment configuration
