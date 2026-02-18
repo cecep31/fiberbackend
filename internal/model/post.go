@@ -15,7 +15,7 @@ type Post struct {
 	CreatedBy     *string        `json:"created_by" gorm:"type:uuid;uniqueIndex:creator_slug_unique"`
 	Body          *string        `json:"body"`
 	Slug          *string        `json:"slug" gorm:"type:varchar(255);uniqueIndex:creator_slug_unique"`
-	Photo_url     *string        `json:"photo_url"`
+	PhotoURL      *string        `json:"photo_url" gorm:"column:photo_url"`
 	Published     *bool          `json:"published" gorm:"default:true"`
 	ViewCount     int64          `json:"view_count" gorm:"type:bigint;default:0"`
 	LikeCount     int64          `json:"like_count" gorm:"type:bigint;default:0"`
@@ -68,7 +68,7 @@ func (p *Post) ToResponse() *PostResponse {
 	return &PostResponse{
 		ID:        p.ID,
 		Title:     p.Title,
-		Photo_url: p.Photo_url,
+		Photo_url: p.PhotoURL,
 		Body:      p.Body,
 		Slug:      p.Slug,
 		ViewCount: p.ViewCount,

@@ -129,7 +129,7 @@ func (r *postRepository) CreatePost(ctx context.Context, postDTO *model.CreatePo
 		Slug:      &postDTO.Slug,
 		Body:      &postDTO.Body,
 		CreatedBy: &userID,
-		Photo_url: &postDTO.Photo_url,
+		PhotoURL:  &postDTO.Photo_url,
 		Published: &postDTO.Published,
 	}
 
@@ -146,7 +146,7 @@ func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.
 		Slug:      &postDTO.Slug,
 		Body:      &postDTO.Body,
 		CreatedBy: &userID,
-		Photo_url: &postDTO.Photo_url,
+		PhotoURL:  &postDTO.Photo_url,
 		Published: &postDTO.Published,
 		Tags:      tags, // Associate tags with the post
 	}

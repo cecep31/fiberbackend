@@ -5,12 +5,11 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fmt"
+	"fiberbackend/pkg/utils"
 	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type PostHandler struct {
@@ -98,11 +97,10 @@ func (h *PostHandler) CreatePost(c fiber.Ctx) error {
 		return response.HandleBindError(c, err)
 	}
 
-	claims, ok := c.Locals("user").(jwt.MapClaims)
-	if !ok || claims["user_id"] == nil {
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Invalid or missing user context")
 	}
-	userID := fmt.Sprintf("%v", claims["user_id"])
 
 	newpost, err := h.postService.CreatePost(c.Context(), &postReq, userID)
 	if err != nil {
@@ -120,14 +118,13 @@ func (h *PostHandler) UpdatePost(c fiber.Ctx) error {
 		return response.HandleBindError(c, err)
 	}
 
-	claims, ok := c.Locals("user").(jwt.MapClaims)
-	if !ok || claims["user_id"] == nil {
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Invalid or missing user context")
 	}
-	userID := fmt.Sprintf("%v", claims["user_id"])
 
 	// Check if the user is the author of the post
-	err := h.postService.IsAuthor(c.Context(), id, userID)
+	err = h.postService.IsAuthor(c.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrNotAuthor) {
 			return response.Forbidden(c, "You are not the author of this post")
@@ -212,11 +209,12 @@ func (h *PostHandler) GetMyPosts(c fiber.Ctx) error {
 	if err != nil {
 		limitInt = 10 // Default limit if not provided or invalid
 	}
-	claims, ok := c.Locals("user").(jwt.MapClaims)
-	if !ok || claims["user_id"] == nil {
+
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Invalid or missing user context")
 	}
-	userID := fmt.Sprintf("%v", claims["user_id"])
+
 	posts, total, err := h.postService.GetPostsByCreatedBy(c.Context(), userID, offsetInt, limitInt)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get posts", err)

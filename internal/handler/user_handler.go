@@ -3,11 +3,10 @@ package handler
 import (
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/utils"
 	"fiberbackend/pkg/validator"
-	"fmt"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type UserHandler struct {
@@ -26,14 +25,7 @@ func (h *UserHandler) GetByID(c fiber.Ctx) error {
 	userID := c.Params("id")
 
 	// Get current user ID from JWT if authenticated
-	var currentUserID string
-	if userClaims := c.Locals("user"); userClaims != nil {
-		if claims, ok := userClaims.(jwt.MapClaims); ok {
-			if uid, exists := claims["user_id"]; exists {
-				currentUserID = fmt.Sprintf("%v", uid)
-			}
-		}
-	}
+	currentUserID, _ := utils.GetUserIDFromContext(c)
 
 	// Get user with follow status
 	userResponse, err := h.userFollowService.GetUserWithFollowStatus(c.Context(), userID, currentUserID)
@@ -60,7 +52,7 @@ func (h *UserHandler) GetUsers(c fiber.Ctx) error {
 	return response.SuccessWithMeta(c, "Successfully retrieved users", users, meta)
 }
 
-// delete user
+// DeleteUser deletes a user by ID
 func (h *UserHandler) DeleteUser(c fiber.Ctx) error {
 	id := c.Params("id")
 	err := h.userService.Delete(c.Context(), id)
@@ -73,24 +65,12 @@ func (h *UserHandler) DeleteUser(c fiber.Ctx) error {
 
 // GetMe returns the current authenticated user's information
 func (h *UserHandler) GetMe(c fiber.Ctx) error {
-	userClaims := c.Locals("user")
-	if userClaims == nil {
-		return response.InternalServerError(c, "User context not found", nil)
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
 	}
 
-	claims, ok := userClaims.(jwt.MapClaims)
-	if !ok {
-		return response.InternalServerError(c, "Invalid user context", nil)
-	}
-
-	userID, exists := claims["user_id"]
-	if !exists {
-		return response.InternalServerError(c, "User ID not found in token", nil)
-	}
-
-	userIDStr := fmt.Sprintf("%v", userID)
-
-	userResponse, err := h.userService.GetByID(c.Context(), userIDStr)
+	userResponse, err := h.userService.GetByID(c.Context(), userID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to retrieve user", err)
 	}

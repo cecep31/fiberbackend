@@ -4,10 +4,9 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fmt"
+	"fiberbackend/pkg/utils"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type CommentHandler struct {
@@ -32,9 +31,10 @@ func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 		return response.HandleBindError(c, err)
 	}
 
-	// Get user ID from JWT token
-	userClaims, _ := c.Locals("user").(jwt.MapClaims)
-	userID := fmt.Sprintf("%v", userClaims["user_id"])
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 
 	comment, err := h.commentService.CreateComment(c.Context(), postID, &dto, userID)
 	if err != nil {
@@ -71,9 +71,10 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 		return response.HandleBindError(c, err)
 	}
 
-	// Get user ID from JWT token
-	userClaims, _ := c.Locals("user").(jwt.MapClaims)
-	userID := fmt.Sprintf("%v", userClaims["user_id"])
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 
 	comment, err := h.commentService.UpdateComment(c.Context(), commentID, dto.Text, userID)
 	if err != nil {
@@ -90,9 +91,10 @@ func (h *CommentHandler) DeleteComment(c fiber.Ctx) error {
 		return response.BadRequest(c, "Comment ID is required", nil)
 	}
 
-	// Get user ID from JWT token
-	userClaims, _ := c.Locals("user").(jwt.MapClaims)
-	userID := fmt.Sprintf("%v", userClaims["user_id"])
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
+		return response.Unauthorized(c, "Invalid or missing user context")
+	}
 
 	if err := h.commentService.DeleteComment(c.Context(), commentID, userID); err != nil {
 		return response.InternalServerError(c, "Failed to delete comment", err)

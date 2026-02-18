@@ -4,11 +4,10 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fmt"
+	"fiberbackend/pkg/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type UserFollowHandler struct {
@@ -21,23 +20,10 @@ func NewUserFollowHandler(userFollowService service.UserFollowService) *UserFoll
 
 // FollowUser follows a user
 func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
-	// Get current user ID from JWT
-	userClaims := c.Locals("user")
-	if userClaims == nil {
+	currentUserID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Authentication required")
 	}
-
-	claims, ok := userClaims.(jwt.MapClaims)
-	if !ok {
-		return response.InternalServerError(c, "Invalid user context", nil)
-	}
-
-	currentUserID, exists := claims["user_id"]
-	if !exists {
-		return response.InternalServerError(c, "User ID not found in token", nil)
-	}
-
-	currentUserIDStr := fmt.Sprintf("%v", currentUserID)
 
 	// Get user ID to follow from request body
 	var followReq model.FollowRequest
@@ -46,7 +32,7 @@ func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
 	}
 
 	// Follow the user
-	followResponse, err := h.userFollowService.FollowUser(c.Context(), currentUserIDStr, followReq.UserID)
+	followResponse, err := h.userFollowService.FollowUser(c.Context(), currentUserID, followReq.UserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to follow user", err)
 	}
@@ -56,23 +42,10 @@ func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
 
 // UnfollowUser unfollows a user
 func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
-	// Get current user ID from JWT
-	userClaims := c.Locals("user")
-	if userClaims == nil {
+	currentUserID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Authentication required")
 	}
-
-	claims, ok := userClaims.(jwt.MapClaims)
-	if !ok {
-		return response.InternalServerError(c, "Invalid user context", nil)
-	}
-
-	currentUserID, exists := claims["user_id"]
-	if !exists {
-		return response.InternalServerError(c, "User ID not found in token", nil)
-	}
-
-	currentUserIDStr := fmt.Sprintf("%v", currentUserID)
 
 	// Get user ID to unfollow from URL parameter
 	userIDToUnfollow := c.Params("id")
@@ -81,7 +54,7 @@ func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
 	}
 
 	// Unfollow the user
-	followResponse, err := h.userFollowService.UnfollowUser(c.Context(), currentUserIDStr, userIDToUnfollow)
+	followResponse, err := h.userFollowService.UnfollowUser(c.Context(), currentUserID, userIDToUnfollow)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to unfollow user", err)
 	}
@@ -173,23 +146,10 @@ func (h *UserFollowHandler) GetFollowStats(c fiber.Ctx) error {
 
 // CheckFollowStatus checks if current user is following a specific user
 func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
-	// Get current user from JWT
-	userClaims := c.Locals("user")
-	if userClaims == nil {
+	currentUserID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Authentication required")
 	}
-
-	claims, ok := userClaims.(jwt.MapClaims)
-	if !ok {
-		return response.InternalServerError(c, "Invalid user context", nil)
-	}
-
-	currentUserID, exists := claims["user_id"]
-	if !exists {
-		return response.InternalServerError(c, "User ID not found in token", nil)
-	}
-
-	currentUserIDStr := fmt.Sprintf("%v", currentUserID)
 
 	// Get target user ID
 	targetUserID := c.Params("id")
@@ -198,7 +158,7 @@ func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
 	}
 
 	// Check follow status
-	isFollowing, err := h.userFollowService.IsFollowing(c.Context(), currentUserIDStr, targetUserID)
+	isFollowing, err := h.userFollowService.IsFollowing(c.Context(), currentUserID, targetUserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to check follow status", err)
 	}
@@ -210,23 +170,10 @@ func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
 
 // GetMutualFollows gets mutual follows between current user and another user
 func (h *UserFollowHandler) GetMutualFollows(c fiber.Ctx) error {
-	// Get current user from JWT
-	userClaims := c.Locals("user")
-	if userClaims == nil {
+	currentUserID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "Authentication required")
 	}
-
-	claims, ok := userClaims.(jwt.MapClaims)
-	if !ok {
-		return response.InternalServerError(c, "Invalid user context", nil)
-	}
-
-	currentUserID, exists := claims["user_id"]
-	if !exists {
-		return response.InternalServerError(c, "User ID not found in token", nil)
-	}
-
-	currentUserIDStr := fmt.Sprintf("%v", currentUserID)
 
 	// Get other user ID
 	otherUserID := c.Params("id")
@@ -235,7 +182,7 @@ func (h *UserFollowHandler) GetMutualFollows(c fiber.Ctx) error {
 	}
 
 	// Get mutual follows
-	mutualFollows, err := h.userFollowService.GetMutualFollows(c.Context(), currentUserIDStr, otherUserID)
+	mutualFollows, err := h.userFollowService.GetMutualFollows(c.Context(), currentUserID, otherUserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get mutual follows", err)
 	}

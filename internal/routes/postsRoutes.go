@@ -5,17 +5,20 @@ import "github.com/gofiber/fiber/v3"
 func (r *Routes) setupPostRoutes(v1 fiber.Router) {
 	posts := v1.Group("/posts")
 	{
+		// Static routes must come BEFORE parameterized routes
 		posts.Post("", r.authMiddleware.Auth(), r.postHandler.CreatePost)
+		posts.Get("", r.postHandler.GetPosts)
+		posts.Get("/random", r.postHandler.GetPostsRandom)
+		posts.Get("/mine", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
+		posts.Post("/image", r.authMiddleware.Auth(), r.postHandler.UploadImagePosts)
 		posts.Get("/username/:username", r.postHandler.GetPostsByUsername)
 		posts.Get("/u/:username/:slug", r.postHandler.GetPostBySlugAndUsername)
 		posts.Get("/tag/:tag", r.postHandler.GetPostsByTag)
-		posts.Get("", r.postHandler.GetPosts)
+
+		// Parameterized routes must come AFTER static routes
+		posts.Get("/:id", r.postHandler.GetPost)
 		posts.Put("/:id", r.authMiddleware.Auth(), r.postHandler.UpdatePost)
 		posts.Delete("/:id", r.authMiddleware.Auth(), r.postHandler.DeletePost)
-		posts.Get("/random", r.postHandler.GetPostsRandom)
-		posts.Get("/:id", r.postHandler.GetPost)
-		posts.Get("/mine", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
-		posts.Post("/image", r.authMiddleware.Auth(), r.postHandler.UploadImagePosts)
 
 		// Comment routes
 		posts.Get("/:id/comments", r.commentHandler.GetCommentsByPostID)

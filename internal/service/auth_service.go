@@ -50,7 +50,7 @@ func NewAuthService(authRepo repository.AuthRepository, userRepo repository.User
 	}
 }
 
-// should be error not hanlde yet
+// Register creates a new user account with the provided credentials
 func (s *authService) Register(ctx context.Context, email, username, password string) (*model.User, error) {
 	_, err := s.authRepo.FindUserByEmail(ctx, email)
 	if err == nil {
@@ -87,11 +87,8 @@ func (s *authService) Register(ctx context.Context, email, username, password st
 }
 
 func (s *authService) Login(ctx context.Context, email, password string) (string, string, *model.User, error) {
-
 	user, err := s.authRepo.FindUserByEmail(ctx, email)
 	if err != nil {
-		fmt.Println("email not found")
-		fmt.Println(err)
 		return "", "", nil, ErrInvalidCredentials
 	}
 
@@ -149,19 +146,14 @@ func (s *authService) CheckUsernameAvailability(ctx context.Context, username st
 	return true, nil // Username is available
 }
 
+// ForgotPassword initiates the password reset process for a user.
+// For security, it always returns success even if the email doesn't exist.
 func (s *authService) ForgotPassword(ctx context.Context, email string) error {
-	// In a real implementation, you'd check if the user exists
-	// For security, we don't reveal whether the email exists or not
+	// Generate password reset token (implementation requires email service integration)
+	_ = "pr_" + base64.RawURLEncoding.EncodeToString(generateRandomBytes(32))
 
-	// Generate password reset token
-	resetToken := "pr_" + base64.RawURLEncoding.EncodeToString(generateRandomBytes(32))
-	expiresAt := time.Now().Add(1 * time.Hour) // Token expires in 1 hour
-
-	// Store the reset token (in a real app, you'd send an email)
-	// For now, we'll store it in the session table or create a password_reset_tokens table
-	// This is a simplified implementation - in production, you'd want to store this properly
-	fmt.Printf("Password reset token for %s: %s (expires at %s)\n", email, resetToken, expiresAt.Format(time.RFC3339))
-
+	// In production: verify user exists, store token with expiry, send email
+	// Always return nil for security (don't reveal if email exists)
 	return nil
 }
 

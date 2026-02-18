@@ -3,11 +3,10 @@ package handler
 import (
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fmt"
+	"fiberbackend/pkg/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type PostLikeHandler struct {
@@ -25,22 +24,13 @@ func (h *PostLikeHandler) LikePost(c fiber.Ctx) error {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	// Get user ID from JWT
-	var userID string
-	if userClaims := c.Locals("user"); userClaims != nil {
-		if claims, ok := userClaims.(jwt.MapClaims); ok {
-			if uid, exists := claims["user_id"]; exists {
-				userID = fmt.Sprintf("%v", uid)
-			}
-		}
-	}
-
-	if userID == "" {
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
 	// Like the post
-	err := h.postLikeService.LikePost(c.Context(), postID, userID)
+	err = h.postLikeService.LikePost(c.Context(), postID, userID)
 	if err != nil {
 		if err.Error() == "user has already liked this post" {
 			return response.BadRequest(c, "You have already liked this post", nil)
@@ -58,22 +48,13 @@ func (h *PostLikeHandler) UnlikePost(c fiber.Ctx) error {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	// Get user ID from JWT
-	var userID string
-	if userClaims := c.Locals("user"); userClaims != nil {
-		if claims, ok := userClaims.(jwt.MapClaims); ok {
-			if uid, exists := claims["user_id"]; exists {
-				userID = fmt.Sprintf("%v", uid)
-			}
-		}
-	}
-
-	if userID == "" {
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
 	// Unlike the post
-	err := h.postLikeService.UnlikePost(c.Context(), postID, userID)
+	err = h.postLikeService.UnlikePost(c.Context(), postID, userID)
 	if err != nil {
 		if err.Error() == "user has not liked this post" {
 			return response.BadRequest(c, "You have not liked this post", nil)
@@ -154,17 +135,8 @@ func (h *PostLikeHandler) CheckUserLiked(c fiber.Ctx) error {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	// Get user ID from JWT
-	var userID string
-	if userClaims := c.Locals("user"); userClaims != nil {
-		if claims, ok := userClaims.(jwt.MapClaims); ok {
-			if uid, exists := claims["user_id"]; exists {
-				userID = fmt.Sprintf("%v", uid)
-			}
-		}
-	}
-
-	if userID == "" {
+	userID, err := utils.RequireUserID(c)
+	if err != nil {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
