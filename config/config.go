@@ -38,6 +38,8 @@ type Config struct {
 	MaxIdleConns int
 	// ConnMaxLifetime is the maximum duration a database connection can be reused
 	ConnMaxLifetime time.Duration
+	// SlowQueryThreshold is the duration threshold for slow-query logging in GORM
+	SlowQueryThreshold time.Duration
 	// Rate limiter configuration
 	// RateLimiterMax is the maximum number of requests allowed per window (0 = disabled)
 	RateLimiterMax int
@@ -59,14 +61,15 @@ func Load() (*Config, error) {
 	gotenv.Load()
 
 	config := &Config{
-		AppPort:         getEnv("PORT", "8080"),
-		JWTSecret:       getEnv("JWT_SECRET", ""), // No default: must be set explicitly for security
-		DatabaseURL:     getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"),
-		MaxOpenConns:    getEnvAsInt("MAX_OPEN_CONNS", 30),
-		MaxIdleConns:    getEnvAsInt("MAX_IDLE_CONNS", 2),
-		ConnMaxLifetime: getEnvAsDuration("CONN_MAX_LIFETIME", 30*time.Minute),
-		RateLimiterMax:  getEnvAsInt("RATE_LIMITER_MAX", 0),
-		RateLimiterTTL:  getEnvAsInt("RATE_LIMITER_TTL", 60),
+		AppPort:            getEnv("PORT", "8080"),
+		JWTSecret:          getEnv("JWT_SECRET", ""), // No default: must be set explicitly for security
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"),
+		MaxOpenConns:       getEnvAsInt("MAX_OPEN_CONNS", 30),
+		MaxIdleConns:       getEnvAsInt("MAX_IDLE_CONNS", 1),
+		ConnMaxLifetime:    getEnvAsDuration("CONN_MAX_LIFETIME", 30*time.Minute),
+		SlowQueryThreshold: getEnvAsDuration("DB_SLOW_QUERY_THRESHOLD", 300*time.Millisecond),
+		RateLimiterMax:     getEnvAsInt("RATE_LIMITER_MAX", 0),
+		RateLimiterTTL:     getEnvAsInt("RATE_LIMITER_TTL", 60),
 		S3: S3Config{
 			Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
 			AccessKey: getEnv("MINIO_ACCESS_KEY", "minioadmin"),

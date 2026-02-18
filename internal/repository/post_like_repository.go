@@ -75,9 +75,17 @@ func (r *postLikeRepository) GetLikeStats(ctx context.Context, postID string) (*
 }
 
 func (r *postLikeRepository) HasUserLikedPost(ctx context.Context, postID, userID string) (bool, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Model(&model.PostLike{}).Where("post_id = ? AND user_id = ?", postID, userID).Count(&count).Error
-	return count > 0, err
+	var exists bool
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT EXISTS (
+			SELECT 1
+			FROM post_likes
+			WHERE post_id = ? AND user_id = ? AND deleted_at IS NULL
+		)`,
+		postID,
+		userID,
+	).Scan(&exists).Error
+	return exists, err
 }
 
 func (r *postLikeRepository) GetLikeByUserAndPost(ctx context.Context, postID, userID string) (*model.PostLike, error) {

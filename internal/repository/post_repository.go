@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors" // For gorm.ErrRecordNotFound checks
 	"fmt"    // For error wrapping
+	"math/rand"
 
 	"fiberbackend/internal/model"
 
@@ -289,11 +290,34 @@ func (r *postRepository) GetPostByID(ctx context.Context, id string) (*model.Pos
 
 func (r *postRepository) GetPostsRandom(ctx context.Context, limit int) ([]*model.Post, error) {
 	var randomPosts []*model.Post
+	if limit <= 0 {
+		limit = 6
+	}
+
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.Post{}).Where("published = ?", true).Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("failed to count published posts: %w", err)
+	}
+	if count == 0 {
+		return randomPosts, nil
+	}
+
+	maxOffset := int(count) - limit
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	offset := 0
+	if maxOffset > 0 {
+		offset = rand.Intn(maxOffset + 1)
+	}
+
 	err := r.db.WithContext(ctx).
 		Preload("User").
 		Preload("Tags").
 		Where("published = ?", true).
-		Order("RANDOM()"). // Works for PostgreSQL and SQLite. For others, might need specific syntax.
+		Order("created_at DESC").
+		Offset(offset).
 		Limit(limit).
 		Find(&randomPosts).Error
 
@@ -407,9 +431,28 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 	var posts []*model.Post
 	var count int64
 
+	// Select only columns required for list/feed responses and trim body payload.
+	selectColumns := []string{
+		"posts.id",
+		"posts.created_at",
+		"posts.updated_at",
+		"posts.deleted_at",
+		"posts.title",
+		"posts.created_by",
+		"LEFT(posts.body, 300) AS body",
+		"posts.slug",
+		"posts.photo_url",
+		"posts.published",
+		"posts.view_count",
+		"posts.like_count",
+	}
+
 	// Build the base query
 	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+		Select(selectColumns).
+		Preload("User", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "username", "image", "first_name", "last_name")
+		}).
 		Preload("Tags")
 
 	// Apply search filter
@@ -445,6 +488,7 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 			Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
 			Where("tags.name IN ?", filter.Tags)
 	}
+	query = query.Distinct()
 
 	// Count total records
 	countQuery := r.db.WithContext(ctx).Model(&model.Post{})
@@ -475,7 +519,7 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 			Where("tags.name IN ?", filter.Tags)
 	}
 
-	err := countQuery.Count(&count).Error
+	err := countQuery.Distinct("posts.id").Count(&count).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
 	}

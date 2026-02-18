@@ -40,7 +40,7 @@ type PostResponse struct {
 	LikeCount int64         `json:"like_count"`
 	Published *bool         `json:"published"`
 	User      *UserSummary  `json:"user,omitempty"`
-	Tags      []TagResponse `json:"tags,omitempty"`
+	Tags      []TagResponse `json:"tags"`
 	CreatedAt *time.Time    `json:"created_at"`
 	UpdatedAt *time.Time    `json:"updated_at"`
 	DeletedAt *time.Time    `json:"deleted_at,omitempty"`
@@ -52,7 +52,7 @@ func (p *Post) ToResponse() *PostResponse {
 		userResp = p.User.ToSummary()
 	}
 
-	var tagResponses []TagResponse
+	tagResponses := make([]TagResponse, 0)
 	if p.Tags != nil {
 		tagResponses = make([]TagResponse, len(p.Tags))
 		for i, tag := range p.Tags {

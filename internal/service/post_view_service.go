@@ -45,8 +45,12 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 	}
 
 	// Check if post exists
-	if _, err := s.postRepo.GetPostByID(ctx, postID); err != nil {
+	exists, err := s.postRepo.ExistsByID(ctx, postID)
+	if err != nil {
 		return fmt.Errorf("failed to verify post existence: %w", err)
+	}
+	if !exists {
+		return errors.New("post not found")
 	}
 
 	// For authenticated users, check if they already viewed this post
@@ -83,11 +87,6 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 	// Record the view
 	if err := s.postViewRepo.CreateView(ctx, view); err != nil {
 		return fmt.Errorf("failed to create view record: %w", err)
-	}
-
-	// Increment post view count
-	if err := s.postViewRepo.IncrementPostViewCount(ctx, postID); err != nil {
-		return fmt.Errorf("failed to increment post view count: %w", err)
 	}
 
 	return nil

@@ -40,9 +40,12 @@ func (s *postLikeService) LikePost(ctx context.Context, postID, userID string) e
 	}
 
 	// Check if post exists
-	_, err := s.postRepo.GetPostByID(ctx, postID)
+	exists, err := s.postRepo.ExistsByID(ctx, postID)
 	if err != nil {
 		return fmt.Errorf("failed to check post existence: %w", err)
+	}
+	if !exists {
+		return errors.New("post not found")
 	}
 
 	// Check if user already liked this post
@@ -75,9 +78,12 @@ func (s *postLikeService) UnlikePost(ctx context.Context, postID, userID string)
 	}
 
 	// Check if post exists
-	_, err := s.postRepo.GetPostByID(ctx, postID)
+	exists, err := s.postRepo.ExistsByID(ctx, postID)
 	if err != nil {
 		return fmt.Errorf("failed to check post existence: %w", err)
+	}
+	if !exists {
+		return errors.New("post not found")
 	}
 
 	// Check if user has liked this post

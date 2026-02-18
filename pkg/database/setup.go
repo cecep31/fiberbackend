@@ -26,7 +26,17 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 	}
 
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(gormLogLevel),
+		Logger: logger.New(
+			log.New(log.Writer(), "\r\n", log.LstdFlags),
+			logger.Config{
+				SlowThreshold:             config.SlowQueryThreshold,
+				LogLevel:                  gormLogLevel,
+				IgnoreRecordNotFoundError: true,
+				ParameterizedQueries:      true,
+				Colorful:                  false,
+			},
+		),
+		PrepareStmt: true,
 	}
 
 	// Parse database configuration
@@ -34,7 +44,6 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 	if err != nil {
 		panic(fmt.Errorf("failed to parse database config: %w", err))
 	}
-	pgxConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	pgxConfig.ConnectTimeout = 10 * time.Second
 
 	// Create database connection with retry logic
