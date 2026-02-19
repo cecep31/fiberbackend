@@ -6,7 +6,6 @@ import (
 	"fiberbackend/config"
 	"fiberbackend/internal/di"
 	"fiberbackend/internal/middleware"
-	"fiberbackend/internal/routes"
 	"fiberbackend/pkg/validator"
 	"log"
 	"net/http"
@@ -44,14 +43,8 @@ func main() {
 	// Setup global middleware first (applies to all routes)
 	middleware.InitMiddleware(app, conf)
 
-	// Initialize routes with dependencies
-	var newroutes *routes.Routes
-	if err := container.Invoke(func(r *routes.Routes) {
-		newroutes = r
-	}); err != nil {
-		panic(err)
-	}
-	newroutes.Setup(app)
+	// Setup routes
+	container.Routes.Setup(app)
 
 	app.Get("/", helloWorld)
 
@@ -80,15 +73,10 @@ func main() {
 	}
 
 	// Cleanup resources
-	cleanup, err := di.GetCleanupManager(container)
-	if err != nil {
-		log.Printf("Failed to get cleanup manager: %v", err)
+	if err := container.Cleanup.CleanupWithTimeout(5 * time.Second); err != nil {
+		log.Printf("Cleanup failed: %v", err)
 	} else {
-		if err := cleanup.CleanupWithTimeout(5 * time.Second); err != nil {
-			log.Printf("Cleanup failed: %v", err)
-		} else {
-			log.Print("Resources cleaned up successfully")
-		}
+		log.Print("Resources cleaned up successfully")
 	}
 
 	log.Print("Server exited")
