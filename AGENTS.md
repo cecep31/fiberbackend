@@ -1,6 +1,6 @@
 # AGENTS.md - Agent Guidelines for FiberBackend
 
-REST API built with Go 1.25+, Fiber v3, PostgreSQL, and GORM. Clean architecture with handler/service/repository layers using Uber's dig for dependency injection.
+REST API built with Go 1.25+, Fiber v3, PostgreSQL, and GORM. Clean architecture with handler/service/repository layers using Uber's dig (`go.uber.org/dig`) for dependency injection.
 
 ## Build/Lint/Test Commands
 
@@ -49,9 +49,16 @@ import (
 ### Formatting
 
 - Use `gofmt` for formatting
-- Max line length: 140 characters
+- Max line length: 140 characters (see `.golangci.yml` `lll` setting)
 - Tabs for indentation
 - No trailing whitespace
+- Enable `goimports` for import organization (local prefix: `fiberbackend`)
+
+### Complexity Limits
+
+- Function max lines: 100 (`funlen` setting)
+- Function max statements: 50
+- Cyclomatic complexity max: 15 (`gocyclo`)
 
 ### Naming Conventions
 
@@ -62,6 +69,13 @@ import (
 - **Constants**: PascalCase for exported
 - **Test files**: `*_test.go`, functions: `TestXxx`
 - **JSON/DB fields**: snake_case (e.g., `first_name`, `created_at`)
+
+### Fiber v3 API
+
+This project uses Fiber v3. Note API differences from v2:
+- Use `c fiber.Ctx` (not `fiber.Ctx`)
+- Use `c.Bind().Body(&req)` (not `c.BodyParser(&req)`)
+- Middleware signature: `func(c fiber.Ctx) error` (not `fiber.Handler`)
 
 ### Types and Structs
 
@@ -80,6 +94,15 @@ type User struct {
 ### Error Handling
 
 Use `AppError` from `pkg/utils/errors.go`. Wrap with `fmt.Errorf("...: %w", err)`. Return early on errors. Check sentinel errors with `errors.Is()`. HTTP handlers use `pkg/response/` helpers.
+
+Define sentinel errors in service packages using `var` declarations:
+
+```go
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserNotFound       = errors.New("user not found")
+)
+```
 
 ### Response Patterns
 
