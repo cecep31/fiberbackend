@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
+	"fiberbackend/pkg/constants"
 	"fiberbackend/pkg/response"
 	"fiberbackend/pkg/utils"
 	"strconv"
@@ -282,12 +283,15 @@ func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 	offset := c.Query("offset")
 	limit := c.Query("limit")
 	offsetInt, err := strconv.Atoi(offset)
-	if err != nil {
-		offsetInt = 0 // Default offset if not provided or invalid
+	if err != nil || offsetInt < 0 {
+		offsetInt = constants.DefaultOffset
 	}
 	limitInt, err := strconv.Atoi(limit)
-	if err != nil {
-		limitInt = 10 // Default limit if not provided or invalid
+	if err != nil || limitInt <= 0 {
+		limitInt = constants.DefaultLimit
+	}
+	if limitInt > constants.MaxLimit {
+		limitInt = constants.MaxLimit
 	}
 	posts, total, err := h.postService.GetPostsByTag(c.Context(), tag, limitInt, offsetInt)
 	if err != nil {
@@ -295,20 +299,21 @@ func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 	}
 
 	for _, post := range posts {
-		if post.Body != nil && len(*post.Body) > 250 {
-			truncated := (*post.Body)[:250] + " ..."
+		if post.Body != nil && len(*post.Body) > constants.PostBodyTruncateLength {
+			truncated := (*post.Body)[:constants.PostBodyTruncateLength] + " ..."
 			post.Body = &truncated
 		}
 	}
 
+	totalInt := int(total)
 	meta := response.PaginationMeta{
-		TotalItems: int(total),
+		TotalItems: totalInt,
 		Offset:     offsetInt,
 		Limit:      limitInt,
-		TotalPages: int(total)/limitInt + 1,
+		TotalPages: totalInt/limitInt + 1,
 	}
-	if int(total)%limitInt == 0 {
-		meta.TotalPages = int(total) / limitInt
+	if limitInt > 0 && totalInt%limitInt == 0 {
+		meta.TotalPages = totalInt / limitInt
 	}
 
 	return response.SuccessWithMeta(c, "success retrieving posts by tag", posts, meta)

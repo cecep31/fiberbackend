@@ -7,6 +7,7 @@ import (
 
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
+	"fiberbackend/pkg/constants"
 	"fiberbackend/pkg/storage"
 	"mime/multipart"
 )
@@ -204,9 +205,12 @@ func (s *postService) GetPostsByCreatedBy(ctx context.Context, createdBy string,
 }
 
 func (s *postService) GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.PostResponse, int64, error) {
-	// Input validation
-	if limit < 0 {
-		limit = 0
+	// Input validation: align with GetPostsFiltered defaults
+	if limit <= 0 {
+		limit = constants.DefaultLimit
+	}
+	if limit > constants.MaxLimit {
+		limit = constants.MaxLimit
 	}
 	if offset < 0 {
 		offset = 0
