@@ -11,7 +11,7 @@ FiberBackend is a modern REST API for a blog/content management system built wit
 - **PostgreSQL**: 14+ via pgx driver
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
 - **File Storage**: MinIO/S3 compatible storage
-- **Dependency Injection**: go.uber.org/dig
+- **Dependency Injection**: Manual DI with cleanup management
 - **Validation**: go-playground/validator/v10
 
 ### Architecture
@@ -26,7 +26,6 @@ The project follows a clean architecture pattern with separation of concerns:
   - **middleware/**: HTTP middleware (authentication, logging, security)
   - **routes/**: Route definitions and setup
   - **di/**: Dependency injection container setup
-- **migrations/**: Database migration files
 - **test/**: Test files
 - **pkg/**: Shared utilities
   - **database/**: Database connection and wrapper
@@ -188,7 +187,7 @@ Available API groups:
 - **Model**: Structs, DB tags, conversion methods (`ToResponse`, `ToSummary`)
 
 ### Dependency Injection
-Uses Uber's `dig` container (`internal/di/container.go`):
+Uses manual DI with cleanup manager (`internal/di/container.go`):
 - Registration order: Config → Database → Repositories → Services → Handlers → Routes
 - Cleanup manager handles resource cleanup on shutdown
 
@@ -207,6 +206,7 @@ Standardized response helpers in handlers:
 - `response.Forbidden(c, message)` - 403
 - `response.NotFound(c, message, err)` - 404
 - `response.InternalServerError(c, message, err)` - 500
+- `response.HandleBindError(c, err)` - Validation errors
 
 ### Validation
 Uses `go-playground/validator` tags on request structs:
@@ -237,6 +237,7 @@ psql -d your_database -f migrations/001_*.sql
 - `internal/middleware/setup.go` - Security and utility middleware
 - `pkg/database/setup.go` - Database connection with retry logic
 - `pkg/response/response.go` - Standardized HTTP response helpers
+- `pkg/utils/errors.go` - Application error types
 - `.air.toml` - Development hot reload configuration
 - `.golangci.yml` - Linter configuration
 - `Dockerfile` - Multi-stage Docker build
