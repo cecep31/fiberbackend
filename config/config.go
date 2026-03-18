@@ -9,15 +9,6 @@ import (
 	"github.com/subosito/gotenv"
 )
 
-// S3Config holds MinIO/S3 storage configuration.
-type S3Config struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	UseSSL    bool
-}
-
 // Config represents the application configuration.
 type Config struct {
 	AppPort string
@@ -35,9 +26,6 @@ type Config struct {
 	// Rate limiter (0 = disabled)
 	RateLimiterMax int
 	RateLimiterTTL int
-
-	// Storage
-	S3 S3Config
 
 	Debug bool
 }
@@ -57,14 +45,7 @@ func Load() (*Config, error) {
 		SlowQueryThreshold: envDuration("DB_SLOW_QUERY_THRESHOLD", 300*time.Millisecond),
 		RateLimiterMax:     envInt("RATE_LIMITER_MAX", 0),
 		RateLimiterTTL:     envInt("RATE_LIMITER_TTL", 60),
-		S3: S3Config{
-			Endpoint:  env("MINIO_ENDPOINT", "localhost:9000"),
-			AccessKey: env("MINIO_ACCESS_KEY", "minioadmin"),
-			SecretKey: env("MINIO_SECRET_KEY", "minioadmin"),
-			Bucket:    env("MINIO_BUCKET", "minio-bucket"),
-			UseSSL:    envBool("MINIO_USE_SSL", false),
-		},
-		Debug: envBool("DEBUG", false),
+		Debug:              envBool("DEBUG", false),
 	}
 
 	if err := cfg.validate(); err != nil {

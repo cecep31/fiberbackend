@@ -318,19 +318,3 @@ func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 
 	return response.SuccessWithMeta(c, "success retrieving posts by tag", posts, meta)
 }
-
-func (h *PostHandler) UploadImagePosts(c fiber.Ctx) error {
-	file, err := c.FormFile("image")
-	if err != nil {
-		return response.BadRequest(c, "Failed to upload image", err)
-	}
-
-	if file == nil {
-		return response.BadRequest(c, "No file uploaded", nil)
-	}
-
-	if err := h.postService.UploadImagePosts(c.Context(), file); err != nil {
-		return response.InternalServerError(c, "Failed to upload image", err)
-	}
-	return response.Success(c, "success uploading image", nil)
-}

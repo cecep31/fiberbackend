@@ -1,6 +1,6 @@
 # Fiber Backend API
 
-A modern REST API for a blog/content management system built with Go, Fiber framework, and PostgreSQL. Features include user management, posts, comments, chat functionality, file uploads, and more.
+A modern REST API for a blog/content management system built with Go, Fiber framework, and PostgreSQL. Features include user management, posts, comments, chat functionality, and more.
 
 ## Features
 
@@ -8,7 +8,6 @@ A modern REST API for a blog/content management system built with Go, Fiber fram
 - **Content Management**: Posts with rich text, images, tags, and versioning
 - **Social Features**: User follows, post likes, comments, and bookmarks
 - **Real-time Chat**: Conversational AI with message history and token tracking
-- **File Storage**: MinIO/S3 integration for file uploads and management
 - **Analytics**: Post view tracking and statistics
 - **Security**: JWT authentication, rate limiting, and input validation
 - **Performance**: Database connection pooling, caching, and optimized queries
@@ -45,17 +44,11 @@ A modern REST API for a blog/content management system built with Go, Fiber fram
    
    # Authentication
    JWT_SECRET=your-secret-key
-   
-   # File Storage (MinIO/S3)
-   MINIO_ENDPOINT=localhost:9000
-   MINIO_ACCESS_KEY=minioadmin
-   MINIO_SECRET_KEY=minioadmin
-   MINIO_BUCKET=minio-bucket
-   
+
    # Rate Limiting
    RATE_LIMITER_MAX=0
    RATE_LIMITER_TTL=60
-   
+
    # Debug
    DEBUG=false
    ```
@@ -147,5 +140,4 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - **GORM**: v1.31.1
 - **PostgreSQL**: 14+
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
-- **File Storage**: MinIO/S3 compatible
 - **Docker**: Containerization support

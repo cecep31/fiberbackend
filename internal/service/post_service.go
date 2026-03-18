@@ -8,8 +8,6 @@ import (
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 	"fiberbackend/pkg/constants"
-	"fiberbackend/pkg/storage"
-	"mime/multipart"
 )
 
 type PostService interface {
@@ -22,7 +20,6 @@ type PostService interface {
 	GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.PostResponse, int64, error)
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.PostResponse, int64, error)
 	DeletePostByID(ctx context.Context, id string) error
-	UploadImagePosts(ctx context.Context, file *multipart.FileHeader) error
 	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
 	UpdatePost(ctx context.Context, id string, post *model.UpdatePostDTO) (*model.Post, error)
 	IsAuthor(ctx context.Context, id string, userid string) error
@@ -34,11 +31,10 @@ var ErrNotAuthor = errors.New("not author")
 type postService struct {
 	postRepo   repository.PostRepository
 	tagService TagService
-	s3storage  *storage.S3Storage
 }
 
-func NewPostService(postRepo repository.PostRepository, tagService TagService, storageclient *storage.S3Storage) PostService {
-	return &postService{postRepo: postRepo, tagService: tagService, s3storage: storageclient}
+func NewPostService(postRepo repository.PostRepository, tagService TagService) PostService {
+	return &postService{postRepo: postRepo, tagService: tagService}
 }
 
 func (s *postService) IsAuthor(ctx context.Context, id string, userid string) error {
@@ -259,22 +255,6 @@ func (s *postService) GetPostsFiltered(ctx context.Context, filter *model.PostQu
 	}
 
 	return postsResponse, total, nil
-}
-
-func (s *postService) UploadImagePosts(ctx context.Context, file *multipart.FileHeader) error {
-	// Input validation
-	if file == nil {
-		return errors.New("file cannot be nil")
-	}
-
-	src, err := file.Open()
-	if err != nil {
-		return fmt.Errorf("failed to open uploaded file: %w", err)
-	}
-	defer src.Close()
-
-	// Use the passed context instead of context.Background() to respect cancellation/timeout
-	return s.s3storage.Save(ctx, file.Filename, src)
 }
 
 // findOrCreateTagByName finds an existing tag by name or creates a new one

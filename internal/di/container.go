@@ -8,7 +8,6 @@ import (
 	"fiberbackend/internal/routes"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/database"
-	"fiberbackend/pkg/storage"
 )
 
 // Container holds all wired application dependencies.
@@ -25,8 +24,6 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	dbWrapper := database.NewDatabase(cfg)
 	cleanup.Register(dbWrapper)
 	db := dbWrapper.DB
-
-	s3 := storage.NewS3Storage(cfg)
 
 	// --- Repositories ---
 	userRepo := repository.NewUserRepository(db)
@@ -45,7 +42,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	tagSvc := service.NewTagService(tagRepo)
 	userSvc := service.NewUserService(userRepo)
 	authSvc := service.NewAuthService(authRepo, userRepo, sessionRepo, cfg)
-	postSvc := service.NewPostService(postRepo, tagSvc, s3)
+	postSvc := service.NewPostService(postRepo, tagSvc)
 	commentSvc := service.NewCommentService(commentRepo, postRepo)
 	postViewSvc := service.NewPostViewService(postViewRepo, postRepo)
 	postLikeSvc := service.NewPostLikeService(postLikeRepo, postRepo)

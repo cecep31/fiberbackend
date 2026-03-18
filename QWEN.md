@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FiberBackend is a modern REST API for a blog/content management system built with Go and the Fiber web framework. The application connects to PostgreSQL for data persistence and includes features like user management, content management, social features, real-time chat, and file storage.
+FiberBackend is a modern REST API for a blog/content management system built with Go and the Fiber web framework. The application connects to PostgreSQL for data persistence and includes features like user management, content management, social features, real-time chat, and more.
 
 ### Key Technologies
 - **Go**: 1.25+
@@ -10,7 +10,6 @@ FiberBackend is a modern REST API for a blog/content management system built wit
 - **GORM**: v1.31.1 for database ORM
 - **PostgreSQL**: 14+ via pgx driver
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
-- **File Storage**: MinIO/S3 compatible storage
 - **Dependency Injection**: Manual DI with cleanup management
 - **Validation**: go-playground/validator/v10
 
@@ -30,7 +29,6 @@ The project follows a clean architecture pattern with separation of concerns:
 - **pkg/**: Shared utilities
   - **database/**: Database connection and wrapper
   - **response/**: Standardized response helpers
-  - **storage/**: File storage utilities
   - **utils/**: General utility functions
   - **validator/**: Custom validator implementation
 
@@ -64,12 +62,6 @@ The project follows a clean architecture pattern with separation of concerns:
 
    # Authentication
    JWT_SECRET=your-secret-key
-
-   # File Storage (MinIO/S3)
-   MINIO_ENDPOINT=localhost:9000
-   MINIO_ACCESS_KEY=minioadmin
-   MINIO_SECRET_KEY=minioadmin
-   MINIO_BUCKET=minio-bucket
 
    # Rate Limiting
    RATE_LIMITER_MAX=0
@@ -150,7 +142,6 @@ flyctl deploy
 - **Content Management**: Posts with rich text, images, tags, and versioning
 - **Social Features**: User follows, post likes, comments, and bookmarks
 - **Real-time Chat**: Conversational AI with message history and token tracking
-- **File Storage**: MinIO/S3 integration for file uploads and management
 - **Analytics**: Post view tracking and statistics
 - **Security**: JWT authentication, rate limiting, and input validation
 - **Performance**: Database connection pooling, caching, and optimized queries
