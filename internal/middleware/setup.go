@@ -7,7 +7,6 @@ import (
 	"fiberbackend/config"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/compress"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/helmet"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
@@ -57,6 +56,5 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 		}))
 	}
 
-	app.Use(compress.New())
 	app.Use(cors.New(cors.Config{AllowOrigins: []string{"*"}}))
 }

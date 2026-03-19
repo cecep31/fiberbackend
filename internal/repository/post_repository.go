@@ -17,6 +17,23 @@ var (
 	ErrPostNotFound = errors.New("post not found")
 )
 
+// postRowTotal scans a post row plus total row count from COUNT(*) OVER() on the same filter.
+type postRowTotal struct {
+	model.Post
+	TotalCount int64 `gorm:"column:__total_count"`
+}
+
+func postsAndTotalFromRows(rows []postRowTotal) ([]*model.Post, int64) {
+	if len(rows) == 0 {
+		return nil, 0
+	}
+	out := make([]*model.Post, len(rows))
+	for i := range rows {
+		out[i] = &rows[i].Post
+	}
+	return out, rows[0].TotalCount
+}
+
 type PostRepository interface {
 	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
 	CreatePostWithTags(ctx context.Context, post *model.CreatePostDTO, userID string, tags []model.Tag) (*model.Post, error)
@@ -168,41 +185,21 @@ func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.
 }
 
 func (r *postRepository) GetPostByUsername(ctx context.Context, username string, offset int, limit int) ([]*model.Post, int64, error) {
-	var posts []*model.Post
-	var count int64
-
-	// Base query for counting and fetching
-	// Assuming Post model has CreatorID field linking to User model's ID,
-	// and User model has Username field.
-	// Table names "posts" and "users" are assumed based on GORM defaults or TableName() methods.
-	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Joins("JOIN users ON users.id = posts.created_by"). // Ensure 'posts.created_by' is the correct foreign key column name
-		Where("users.username = ?", username)
-
-	// Count total records
-	err := query.Count(&count).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts for username %s: %w", username, err)
-	}
-
-	// Get paginated records
-	// Re-apply Joins or ensure Preload works as expected.
-	// For Preload("User"), GORM uses the defined foreign keys.
-	// The explicit Join above is mainly for the WHERE clause on users.username.
-	err = r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User"). // GORM will fetch User based on associations
+	var rows []postRowTotal
+	err := r.db.WithContext(ctx).Model(&model.Post{}).
+		Select("posts.*, COUNT(*) OVER() AS __total_count").
+		Preload("User").
 		Preload("Tags").
-		Joins("JOIN users ON users.id = posts.created_by"). // Keep join for filtering
+		Joins("JOIN users ON users.id = posts.created_by").
 		Where("users.username = ?", username).
-		Order("posts.created_at DESC"). // Assuming 'posts' is the table name for Post model
+		Order("posts.created_at DESC").
 		Offset(offset).
 		Limit(limit).
-		Find(&posts).Error
-
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts for username %s: %w", username, err)
 	}
-
+	posts, count := postsAndTotalFromRows(rows)
 	return posts, count, nil
 }
 
@@ -220,28 +217,20 @@ func (r *postRepository) DeletePostByID(ctx context.Context, id string) error {
 }
 
 func (r *postRepository) GetPosts(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error) {
-	var posts []*model.Post
-	var count int64
-
-	// Count total published records
-	err := r.db.WithContext(ctx).Model(&model.Post{}).Where("published = ?", true).Count(&count).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
-	}
-
-	// Get paginated published records
-	err = r.db.WithContext(ctx).
+	var rows []postRowTotal
+	err := r.db.WithContext(ctx).Model(&model.Post{}).
+		Select("posts.*, COUNT(*) OVER() AS __total_count").
 		Preload("User").
 		Preload("Tags").
 		Where("published = ?", true).
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&posts).Error
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts: %w", err)
 	}
-
+	posts, count := postsAndTotalFromRows(rows)
 	return posts, count, nil
 }
 
@@ -328,79 +317,48 @@ func (r *postRepository) GetPostsRandom(ctx context.Context, limit int) ([]*mode
 }
 
 func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.Post, int64, error) {
-	var posts []*model.Post
-	var count int64
-
-	// Count posts by created_by (user ID)
-	// Assuming model.Post has a 'CreatedBy' field that stores the user ID.
-	err := r.db.WithContext(ctx).Model(&model.Post{}).Where("created_by = ?", createdBy).Count(&count).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts by user ID %s: %w", createdBy, err)
-	}
-
-	// Get paginated records
-	err = r.db.WithContext(ctx).
-		Preload("User"). // Preload user details
-		Preload("Tags"). // Preload tags
+	var rows []postRowTotal
+	err := r.db.WithContext(ctx).Model(&model.Post{}).
+		Select("posts.*, COUNT(*) OVER() AS __total_count").
+		Preload("User").
+		Preload("Tags").
 		Where("created_by = ?", createdBy).
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
-		Find(&posts).Error
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts by user ID %s: %w", createdBy, err)
 	}
+	posts, count := postsAndTotalFromRows(rows)
 	return posts, count, nil
 }
 
 // SearchPosts allows searching posts by keyword in title or body.
 func (r *postRepository) SearchPosts(ctx context.Context, keyword string, limit int, offset int) ([]*model.Post, int64, error) {
-	var posts []*model.Post
-	var count int64
 	likePattern := "%" + keyword + "%"
-
-	// Count total matching records
+	var rows []postRowTotal
 	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("(title ILIKE ? OR body ILIKE ?) AND published = ?", likePattern, likePattern, true).
-		Count(&count).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts for search: %w", err)
-	}
-
-	// Get paginated records
-	err = r.db.WithContext(ctx).
+		Select("posts.*, COUNT(*) OVER() AS __total_count").
 		Preload("User").
 		Preload("Tags").
 		Where("(title ILIKE ? OR body ILIKE ?) AND published = ?", likePattern, likePattern, true).
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&posts).Error
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to search posts: %w", err)
 	}
+	posts, count := postsAndTotalFromRows(rows)
 	return posts, count, nil
 }
 
 // GetPostsByTag fetches posts with a specific tag name.
 func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.Post, int64, error) {
-	var posts []*model.Post
-	var count int64
-
-	// Join posts and tags tables
-	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
-		Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
-		Where("tags.name = ? AND posts.published = ?", tag, true)
-
-	// Count total records
-	err := query.Count(&count).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count posts by tag: %w", err)
-	}
-
-	// Get paginated records
-	err = r.db.WithContext(ctx).Model(&model.Post{}).
+	var rows []postRowTotal
+	err := r.db.WithContext(ctx).Model(&model.Post{}).
+		Select("posts.*, COUNT(*) OVER() AS __total_count").
 		Preload("User").
 		Preload("Tags").
 		Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
@@ -409,10 +367,11 @@ func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit in
 		Order("posts.created_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&posts).Error
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts by tag: %w", err)
 	}
+	posts, count := postsAndTotalFromRows(rows)
 	return posts, count, nil
 }
 
