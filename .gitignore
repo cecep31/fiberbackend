@@ -1,7 +1,8 @@
 # Environment variables
 .env
 
-# Binaries for programs and plugins
+# Binaries
+bin/
 *.exe
 *.exe~
 *.dll
@@ -22,8 +23,3 @@ go.work
 
 # Temporary files
 tmp/
-
-
-bin/fiberbackend
-bin/fiberbackend.exe
-bin/main
