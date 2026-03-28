@@ -4,105 +4,104 @@ This document provides a comprehensive guide for developers working on the Go Fi
 
 ## Project Overview
 
-This project is a modern REST API for a blog/content management system built with the Go programming language and the Fiber web framework. It leverages a PostgreSQL database for data storage and follows a clean architecture pattern, separating concerns into distinct layers: handlers, services, and repositories.
+This project is a modern REST API for a blog/content management system built with the Go programming language and the Fiber web framework (v3). It leverages a PostgreSQL database with GORM for data storage and follows a clean architecture pattern, separating concerns into distinct layers: handlers, services, and repositories.
 
 ### Key Technologies
 
-*   **Backend:** Go (version 1.25 or higher)
-*   **Web Framework:** Fiber
-*   **Database:** PostgreSQL
+*   **Backend:** Go (version 1.25.0)
+*   **Web Framework:** Fiber v3 (Note: utilizes v3 specific patterns like `c.Bind().Body(&req)`)
+*   **Database:** PostgreSQL with GORM
 *   **Authentication:** JWT (JSON Web Tokens)
+*   **Validation:** go-playground/validator
 *   **Containerization:** Docker
-*   **CI/CD:** GitHub Actions
+*   **Hot Reloading:** Air
 
 ### Architecture
 
-The project adheres to a clean architecture, promoting a separation of concerns and maintainability. The core components are:
+The project adheres to a clean architecture (Handler → Service → Repository → Model), promoting a separation of concerns and maintainability.
 
-*   **`cmd/main.go`**: The application's entry point, responsible for initializing the server, loading configuration, and setting up dependencies.
-*   **`internal/`**: Contains the core application logic, organized into the following subdirectories:
-    *   **`handler`**: HTTP handlers that process incoming requests and formulate responses.
-    *   **`service`**: Business logic and use cases.
-    *   **`repository`**: Data access layer that interacts with the PostgreSQL database.
-    *   **`model`**: Data structures representing database entities.
-    *   **`middleware`**: Custom middleware for handling cross-cutting concerns like authentication and logging.
-    *   **`routes`**: Defines the application's API endpoints.
+*   **`cmd/main.go`**: The application's entry point. Initializes config, DI container, Fiber app, middleware, and routes. Implements graceful shutdown.
+*   **`internal/`**: Core application logic.
+    *   **`di/`**: Manual dependency injection container (`container.go`). *Note: Does not use reflection-based DI libraries like dig.*
+    *   **`handler/`**: HTTP handlers processing requests and formulating responses using `pkg/response` helpers.
+    *   **`service/`**: Business logic and use cases. Orchestrates repositories and handles transactions.
+    *   **`repository/`**: Data access layer using GORM for PostgreSQL.
+    *   **`model/`**: GORM models with JSON and DB tags.
+    *   **`middleware/`**: Global and route-specific middleware (Auth, Rate Limiting, Logging, Security headers).
+    *   **`routes/`**: API route definitions, organized by domain.
 *   **`pkg/`**: Shared utility packages.
-*   **`migrations/`**: SQL scripts for database schema management.
+    *   **`response/`**: Standardized API response helpers (e.g., `Success`, `Created`, `BadRequest`, `HandleBindError`).
+    *   **`validator/`**: Custom struct validator integration for Fiber.
+*   **`config/`**: Configuration management using environment variables and `.env` files.
 
 ## Building and Running
 
 ### Prerequisites
 
-*   Go 1.25+
+*   Go 1.25.0+
 *   PostgreSQL 14+
-*   Docker (optional)
+*   Air (for live-reloading)
 
 ### Local Development
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd fiberbackend
-    ```
-
-2.  **Set up environment variables:**
-    Copy the example environment file and customize it with your local settings:
+1.  **Environment Setup:**
     ```bash
     cp .env.example .env
+    # Edit .env with your local credentials. JWT_SECRET must be at least 32 characters.
     ```
 
-3.  **Install dependencies:**
+2.  **Install Dependencies:**
     ```bash
     go mod download
     ```
 
-4.  **Run the application:**
-    For a single run, use:
+3.  **Run the Application:**
+    *   **Directly:** `go run cmd/main.go`
+    *   **With Hot Reloading:** `air` (Uses `.air.toml` configuration)
+
+4.  **Testing:**
     ```bash
-    go run cmd/main.go
+    go test ./...                   # Run all tests
+    go test -v ./...                # Verbose output
+    go test -cover ./...            # With coverage
     ```
 
-    For live-reloading during development, the `.air.toml` file is configured to automatically rebuild and restart the application when changes are detected:
+5.  **Linting & Quality:**
     ```bash
-    air
+    golangci-lint run               # Run all linters (see .golangci.yml)
+    go vet ./...                    # Vet all packages
+    gofmt -l .                      # Check formatting
     ```
 
-### Testing
-
-Run the test suite with:
-
-```bash
-make test
-```
+### TODO: Makefile
+The `README.md` references a `Makefile` with commands like `make build`, `make dev`, `make test`, `make fmt`, and `make lint`, but no `Makefile` was found in the repository root. Developers should use the `go` commands listed above until a `Makefile` is implemented.
 
 ## Development Conventions
 
-*   **Code Style:** Adhere to the standard Go formatting guidelines. Use `make fmt` to format the code.
-*   **Linting:** The project uses `golangci-lint` for static analysis. Run the linter with `make lint`.
-*   **Contribution:** Follow the guidelines outlined in the `README.md` file. All new features should include corresponding tests.
+### Code Style
+*   **Imports:** Group imports: 1) Standard library, 2) Local (`fiberbackend/...`), 3) Third-party. Separate with blank lines.
+*   **Naming:** 
+    *   Packages: lowercase, single word.
+    *   Exported identifiers: `PascalCase`.
+    *   Unexported identifiers: `camelCase`.
+    *   Interfaces: Noun ending in "-er" (e.g., `UserService`).
+*   **Formatting:** Use `gofmt`. Max line length is 140 characters (per `.golangci.yml`).
 
-## Deployment
+### API Practices
+*   **Versioning:** All API endpoints are prefixed with `/v1` (defined in `internal/routes/routes.go`).
+*   **JSON Responses:** Use `pkg/response` helpers for consistent API output.
+*   **Validation:** Use `go-playground/validator` tags in request structs. Handle binding errors with `response.HandleBindError(c, err)`.
+*   **Error Handling:** Return early on errors. Wrap errors with context: `fmt.Errorf("context: %w", err)`.
 
-### Containerization
+### Testing
+*   Table-driven tests are preferred.
+*   Use `github.com/stretchr/testify/assert` for assertions.
+*   Tests are located in the `test/` directory and alongside source files.
 
-The project includes a multi-stage `Dockerfile` for building a lightweight and secure container image. To build the Docker image:
+## API Structure
 
-```bash
-docker build -t fiberbackend .
-```
-
-To run the application in a Docker container:
-
-```bash
-docker run -p 8080:8080 fiberbackend
-```
-
-### Continuous Integration and Deployment (CI/CD)
-
-The repository is configured with a GitHub Actions workflow in `.github/workflows/main.yml`. The workflow automates the following process on every push to the `main` branch:
-
-1.  **Build and Push:** A Docker image is built and pushed to Docker Hub.
-2.  **Deploy:** The application is deployed to Fly.io.
-
-The deployment process relies on secrets for Docker Hub and Fly.io API tokens, which are configured in the GitHub repository's settings.
+*   **Auth:** `/v1/auth/*` (Register, Login, Refresh, Password management)
+*   **Posts:** `/v1/posts/*` (CRUD, Comments, Likes, Views, Tag filtering)
+*   **Users:** `/v1/users/*` (Profile, Following)
+*   **Chat:** `/v1/chat/conversations/*` (Conversational AI management)
+*   **Holdings:** `/v1/holdings/*` (Asset tracking)
