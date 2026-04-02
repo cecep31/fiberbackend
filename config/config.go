@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -16,6 +17,10 @@ type Config struct {
 	// JWT
 	JWTSecret        string
 	JWTExpirationHrs int // JWT access token expiration in hours
+
+	// Logging
+	LogLevel  string // debug, info, warn, error
+	LogFormat string // text, json
 
 	// Database
 	DatabaseURL        string
@@ -40,6 +45,8 @@ func Load() (*Config, error) {
 		AppPort:            env("PORT", "8080"),
 		JWTSecret:          env("JWT_SECRET", ""),
 		JWTExpirationHrs:   envInt("JWT_EXPIRATION_HRS", 6),
+		LogLevel:           env("LOG_LEVEL", "info"),
+		LogFormat:          env("LOG_FORMAT", "text"),
 		DatabaseURL:        env("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"),
 		MaxOpenConns:       envInt("MAX_OPEN_CONNS", 30),
 		MaxIdleConns:       envInt("MAX_IDLE_CONNS", 1),
@@ -106,4 +113,20 @@ func envDuration(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
+}
+
+// parseLogLevel parses the log level string to slog.Level
+func (c *Config) ParseLogLevel() slog.Level {
+	switch c.LogLevel {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }

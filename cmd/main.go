@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 	"fiberbackend/config"
 	"fiberbackend/internal/di"
 	"fiberbackend/internal/middleware"
+	"fiberbackend/pkg/logger"
 	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
@@ -25,9 +25,20 @@ func main() {
 		panic(errconf)
 	}
 
+	// Initialize structured logger
+	log := logger.New(conf.ParseLogLevel(), conf.LogFormat, true)
+
+	log.Info("starting application",
+		logger.String("port", conf.AppPort),
+		logger.String("log_level", conf.LogLevel),
+		logger.String("log_format", conf.LogFormat),
+		logger.Bool("debug", conf.Debug),
+	)
+
 	// Initialize dependency container
 	container, err := di.NewContainer(conf)
 	if err != nil {
+		log.Error("failed to initialize container", logger.Err(err))
 		panic(err)
 	}
 
@@ -47,13 +58,20 @@ func main() {
 	// Setup routes
 	container.Routes.Setup(app)
 
+	// Health and readiness endpoints
+	app.Get("/health", healthCheck)
+	app.Get("/ready", readinessCheck)
+
 	app.Get("/", helloWorld)
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting server on port %s", conf.AppPort)
+		log.Info("starting server",
+			logger.String("port", conf.AppPort),
+			logger.String("address", "http://localhost:"+conf.AppPort),
+		)
 		if err := app.Listen(":" + conf.AppPort); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("shutting down the server: %v", err)
+			log.Error("server shutdown error", logger.Err(err))
 		}
 	}()
 
@@ -62,7 +80,7 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Print("Server is shutting down...")
+	log.Info("shutting down server")
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -70,17 +88,31 @@ func main() {
 
 	// Shutdown Fiber server
 	if err := app.ShutdownWithContext(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		log.Error("server forced to shutdown", logger.Err(err))
 	}
 
 	// Cleanup resources
 	if err := container.Cleanup.CleanupWithTimeout(5 * time.Second); err != nil {
-		log.Printf("Cleanup failed: %v", err)
+		log.Warn("cleanup failed", logger.Err(err))
 	} else {
-		log.Print("Resources cleaned up successfully")
+		log.Info("resources cleaned up successfully")
 	}
 
-	log.Print("Server exited")
+	log.Info("server exited")
+}
+
+func healthCheck(c fiber.Ctx) error {
+	return c.Status(http.StatusOK).JSON(map[string]any{
+		"status":  "healthy",
+		"success": true,
+	})
+}
+
+func readinessCheck(c fiber.Ctx) error {
+	return c.Status(http.StatusOK).JSON(map[string]any{
+		"status":  "ready",
+		"success": true,
+	})
 }
 
 func jsonErrorHandler(c fiber.Ctx, err error) error {

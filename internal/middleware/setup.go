@@ -1,10 +1,10 @@
 package middleware
 
 import (
-	"log"
 	"time"
 
 	"fiberbackend/config"
+	"fiberbackend/pkg/logger"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -15,8 +15,13 @@ import (
 )
 
 func InitMiddleware(app *fiber.App, config *config.Config) {
+	// Create logger for middleware
+	log := logger.New(config.ParseLogLevel(), config.LogFormat, false)
+
 	// Recover first so any panic in downstream middleware/handlers is caught
-	app.Use(recover.New())
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+	}))
 	app.Use(requestid.New())
 
 	// Add security headers
@@ -29,24 +34,27 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 		ReferrerPolicy:        "strict-origin-when-cross-origin",
 	}))
 
-	// Request logging can add noticeable overhead under load, keep it in debug mode.
-	if config.Debug {
-		app.Use(func(c fiber.Ctx) error {
-			start := time.Now()
-			err := c.Next()
-			latency := time.Since(start)
-			log.Printf(
-				"handled request method=%s uri=%s request_id=%s status=%d latency=%.3f ms remote_ip=%s",
-				c.Method(),
-				c.OriginalURL(),
-				c.Get(fiber.HeaderXRequestID),
-				c.Response().StatusCode(),
-				float64(latency.Nanoseconds())/1000000,
-				c.IP(),
-			)
-			return err
-		})
-	}
+	// Request logging with structured format
+	app.Use(func(c fiber.Ctx) error {
+		start := time.Now()
+		err := c.Next()
+
+		latency := time.Since(start)
+		statusCode := c.Response().StatusCode()
+
+		// Log with structured fields
+		log.Info("request handled",
+			logger.String("method", c.Method()),
+			logger.String("uri", c.OriginalURL()),
+			logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+			logger.Int("status", statusCode),
+			logger.Duration("latency_ms", latency),
+			logger.String("remote_ip", c.IP()),
+			logger.String("user_agent", c.Get(fiber.HeaderUserAgent)),
+		)
+
+		return err
+	})
 
 	// Enhanced rate limiting with custom store and configuration
 	if config.RateLimiterMax > 0 {

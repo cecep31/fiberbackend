@@ -1,13 +1,17 @@
 package response
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
+	"fiberbackend/pkg/logger"
 	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
+
+// apiLogger is the logger for response package
+var apiLogger = logger.New(slog.LevelInfo, "text", false)
 
 // APIResponse represents the standard API response format
 type APIResponse struct {
@@ -28,7 +32,10 @@ type PaginationMeta struct {
 
 // Success sends a successful response
 func Success(c fiber.Ctx, message string, data any) error {
-	log.Printf("Success response request_id=%s message=%s", c.Get(fiber.HeaderXRequestID), message)
+	apiLogger.Info(message,
+		logger.String("type", "success"),
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+	)
 
 	return c.Status(http.StatusOK).JSON(APIResponse{
 		Success: true,
@@ -39,7 +46,10 @@ func Success(c fiber.Ctx, message string, data any) error {
 
 // SuccessWithMeta sends a successful response with metadata
 func SuccessWithMeta(c fiber.Ctx, message string, data any, meta any) error {
-	log.Printf("Success response with meta request_id=%s message=%s", c.Get(fiber.HeaderXRequestID), message)
+	apiLogger.Info(message,
+		logger.String("type", "success"),
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+	)
 
 	return c.Status(http.StatusOK).JSON(APIResponse{
 		Success: true,
@@ -51,7 +61,10 @@ func SuccessWithMeta(c fiber.Ctx, message string, data any, meta any) error {
 
 // Created sends a created response
 func Created(c fiber.Ctx, message string, data any) error {
-	log.Printf("Created response request_id=%s message=%s", c.Get(fiber.HeaderXRequestID), message)
+	apiLogger.Info(message,
+		logger.String("type", "created"),
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+	)
 
 	return c.Status(http.StatusCreated).JSON(APIResponse{
 		Success: true,
@@ -68,7 +81,10 @@ func HandleBindError(c fiber.Ctx, err error) error {
 		return nil
 	}
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
-		log.Printf("Validation error (bind) request_id=%s errors=%d", c.Get(fiber.HeaderXRequestID), len(validationErrors.Errors))
+		apiLogger.Warn("Validation failed",
+			logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+			logger.Int("error_count", len(validationErrors.Errors)),
+		)
 		return c.Status(http.StatusBadRequest).JSON(APIResponse{
 			Success: false,
 			Message: "Validation failed",
@@ -86,7 +102,10 @@ func BadRequest(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	log.Printf("Bad request request_id=%s message=%s error=%s", c.Get(fiber.HeaderXRequestID), message, errorMsg)
+	apiLogger.Warn(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("error", errorMsg),
+	)
 
 	return c.Status(http.StatusBadRequest).JSON(APIResponse{
 		Success: false,
@@ -97,7 +116,10 @@ func BadRequest(c fiber.Ctx, message string, err error) error {
 
 // Unauthorized sends an unauthorized error response
 func Unauthorized(c fiber.Ctx, message string) error {
-	log.Printf("Unauthorized access request_id=%s message=%s", c.Get(fiber.HeaderXRequestID), message)
+	apiLogger.Warn(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("type", "unauthorized"),
+	)
 
 	return c.Status(http.StatusUnauthorized).JSON(APIResponse{
 		Success: false,
@@ -108,7 +130,10 @@ func Unauthorized(c fiber.Ctx, message string) error {
 
 // Forbidden sends a forbidden error response
 func Forbidden(c fiber.Ctx, message string) error {
-	log.Printf("Forbidden access request_id=%s message=%s", c.Get(fiber.HeaderXRequestID), message)
+	apiLogger.Warn(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("type", "forbidden"),
+	)
 
 	return c.Status(http.StatusForbidden).JSON(APIResponse{
 		Success: false,
@@ -124,7 +149,10 @@ func NotFound(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	log.Printf("Resource not found request_id=%s message=%s error=%s", c.Get(fiber.HeaderXRequestID), message, errorMsg)
+	apiLogger.Warn(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("error", errorMsg),
+	)
 
 	return c.Status(http.StatusNotFound).JSON(APIResponse{
 		Success: false,
@@ -140,7 +168,10 @@ func InternalServerError(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	log.Printf("Internal server error request_id=%s message=%s error=%s", c.Get(fiber.HeaderXRequestID), message, errorMsg)
+	apiLogger.Error(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("error", errorMsg),
+	)
 
 	return c.Status(http.StatusInternalServerError).JSON(APIResponse{
 		Success: false,
@@ -156,7 +187,10 @@ func ValidationError(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	log.Printf("Validation error request_id=%s message=%s error=%s", c.Get(fiber.HeaderXRequestID), message, errorMsg)
+	apiLogger.Warn(message,
+		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
+		logger.String("error", errorMsg),
+	)
 
 	return c.Status(http.StatusUnprocessableEntity).JSON(APIResponse{
 		Success: false,

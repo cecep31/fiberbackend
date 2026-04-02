@@ -4,39 +4,34 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"fiberbackend/config"
+	"fiberbackend/pkg/logger"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // NewDatabase creates a new database connection using the provided configuration
 func NewDatabase(config *config.Config) *DatabaseWrapper {
+	// Create logger for database operations
+	dbLog := logger.New(config.ParseLogLevel(), config.LogFormat, false)
+
 	// Configure GORM logger
-	var gormLogLevel logger.LogLevel
+	var gormLogLevel gormlogger.LogLevel
 	if config.Debug {
-		gormLogLevel = logger.Info
+		gormLogLevel = gormlogger.Info
 	} else {
-		gormLogLevel = logger.Error
+		gormLogLevel = gormlogger.Error
 	}
 
+	// Create custom GORM logger that uses our structured logger
 	gormConfig := &gorm.Config{
-		Logger: logger.New(
-			log.New(log.Writer(), "\r\n", log.LstdFlags),
-			logger.Config{
-				SlowThreshold:             config.SlowQueryThreshold,
-				LogLevel:                  gormLogLevel,
-				IgnoreRecordNotFoundError: true,
-				ParameterizedQueries:      true,
-				Colorful:                  false,
-			},
-		),
+		Logger:      NewGormLogger(dbLog.Logger, gormLogLevel, config.SlowQueryThreshold),
 		PrepareStmt: true,
 	}
 
@@ -59,7 +54,10 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 		if attempt > 0 {
 			delay := baseDelay * time.Duration(1<<uint(attempt-1))
 			time.Sleep(delay)
-			log.Printf("Retrying database connection (attempt %d/%d)", attempt+1, maxRetries)
+			dbLog.Info("retrying database connection",
+				logger.Int("attempt", attempt+1),
+				logger.Int("max_retries", maxRetries),
+			)
 		}
 
 		sqldb = stdlib.OpenDB(*pgxConfig)
@@ -90,7 +88,11 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 			Conn: sqldb,
 		}), gormConfig)
 		if err != nil {
-			log.Printf("Failed to connect to database (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			dbLog.Warn("failed to connect to database",
+				logger.Int("attempt", attempt+1),
+				logger.Int("max_retries", maxRetries),
+				logger.Err(err),
+			)
 			if sqldb != nil {
 				sqldb.Close()
 			}
@@ -100,21 +102,29 @@ func NewDatabase(config *config.Config) *DatabaseWrapper {
 		// Verify connection
 		sqlDB, err := db.DB()
 		if err != nil {
-			log.Printf("Failed to get underlying sql.DB (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			dbLog.Warn("failed to get underlying sql.DB",
+				logger.Int("attempt", attempt+1),
+				logger.Int("max_retries", maxRetries),
+				logger.Err(err),
+			)
 			continue
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := sqlDB.PingContext(ctx); err != nil {
 			cancel()
-			log.Printf("Failed to ping database (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			dbLog.Warn("failed to ping database",
+				logger.Int("attempt", attempt+1),
+				logger.Int("max_retries", maxRetries),
+				logger.Err(err),
+			)
 			sqlDB.Close()
 			continue
 		}
 		cancel()
 
 		// Connection successful
-		log.Printf("Successfully connected to database")
+		dbLog.Info("successfully connected to database")
 		break
 	}
 
