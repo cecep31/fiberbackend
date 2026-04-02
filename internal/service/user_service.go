@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
-	"fmt"
 )
 
 type UserService interface {

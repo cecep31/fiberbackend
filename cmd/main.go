@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"fiberbackend/config"
-	"fiberbackend/internal/di"
-	"fiberbackend/internal/middleware"
-	"fiberbackend/pkg/validator"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"fiberbackend/config"
+	"fiberbackend/internal/di"
+	"fiberbackend/internal/middleware"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )

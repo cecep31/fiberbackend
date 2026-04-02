@@ -3,11 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 	"fiberbackend/pkg/validator"
-	"fmt"
-	"time"
 )
 
 type PostLikeService interface {

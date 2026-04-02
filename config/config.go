@@ -14,7 +14,8 @@ type Config struct {
 	AppPort string
 
 	// JWT
-	JWTSecret string
+	JWTSecret        string
+	JWTExpirationHrs int // JWT access token expiration in hours
 
 	// Database
 	DatabaseURL        string
@@ -38,6 +39,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		AppPort:            env("PORT", "8080"),
 		JWTSecret:          env("JWT_SECRET", ""),
+		JWTExpirationHrs:   envInt("JWT_EXPIRATION_HRS", 6),
 		DatabaseURL:        env("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"),
 		MaxOpenConns:       envInt("MAX_OPEN_CONNS", 30),
 		MaxIdleConns:       envInt("MAX_IDLE_CONNS", 1),

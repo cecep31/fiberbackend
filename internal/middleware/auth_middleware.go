@@ -1,10 +1,11 @@
 package middleware
 
 import (
-	"fiberbackend/config"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"fiberbackend/config"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"

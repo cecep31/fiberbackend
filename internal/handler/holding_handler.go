@@ -1,13 +1,14 @@
 package handler
 
 import (
+	"fmt"
+	"strconv"
+	"time"
+
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fmt"
-	"strconv"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"

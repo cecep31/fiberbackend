@@ -6,14 +6,15 @@ import (
 	"fmt"
 
 	"fiberbackend/internal/model"
+	"fiberbackend/pkg/utils"
 
 	"gorm.io/gorm"
 )
 
-// Errors that can be returned by the repository
+// Errors that can be returned by the repository (deprecated: use pkg/utils)
 var (
-	ErrUserNotFound = errors.New("user not found")
-	ErrUserExists   = errors.New("user already exists")
+	ErrUserNotFound = utils.ErrUserNotFound
+	ErrUserExists   = utils.ErrUserAlreadyExists
 )
 
 type UserRepository interface {
@@ -24,6 +25,7 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) error
+	UpdatePartial(ctx context.Context, id string, updates map[string]interface{}) error
 	SoftDeleteByID(ctx context.Context, id string) error
 	Exists(ctx context.Context, email string) (bool, error)
 	CheckUserByUsername(ctx context.Context, username string) error
@@ -67,23 +69,31 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 }
 
 func (r *userRepository) Update(ctx context.Context, user *model.User) error {
-	// Ensure `UpdatedAt` is set if you have such a field and GORM doesn't handle it automatically
-	// based on your model definition or hooks. GORM typically handles `UpdatedAt` automatically.
 	result := r.db.WithContext(ctx).Model(user).
-		// Select specific columns to update. GORM updates non-zero fields by default.
-		// If you want to update all fields including zero values, use Select("*")
-		// or specify all columns. For partial updates, this is good.
-		Select("Email", "FirstName", "LastName", "Username", "IsSuperAdmin"). // Note: GORM uses struct field names. UpdatedAt is handled by GORM.
+		Select("*").
 		Where("id = ?", user.ID).
-		Updates(user) // Updates will only update non-zero fields of the user struct unless specified in Select.
-		// If you want to update specific fields to their zero values, use a map:
-		// Updates(map[string]interface{}{"name": user.Name, "email": user.Email, ...})
+		Updates(user)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update user: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrUserNotFound // Or handle as a specific case where no update occurred
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// UpdatePartial updates specific fields of a user using a map
+func (r *userRepository) UpdatePartial(ctx context.Context, id string, updates map[string]interface{}) error {
+	result := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", id).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
 	}
 	return nil
 }

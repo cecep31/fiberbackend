@@ -3,10 +3,11 @@ package database
 import (
 	"context"
 	"database/sql"
-	"fiberbackend/config"
 	"fmt"
 	"log"
 	"time"
+
+	"fiberbackend/config"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"

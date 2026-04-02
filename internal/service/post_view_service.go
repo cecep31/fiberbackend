@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"fiberbackend/internal/model"
-	"fiberbackend/internal/repository"
 	"fmt"
 	"time"
+
+	"fiberbackend/internal/model"
+	"fiberbackend/internal/repository"
 )
 
 // PostViewService defines the interface for post view operations

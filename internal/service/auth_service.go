@@ -2,26 +2,28 @@ package service
 
 import (
 	"context"
-	"errors"
-	"fiberbackend/config"
-	"fiberbackend/internal/model"
-	"fiberbackend/internal/repository"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 
-	"crypto/rand"
-	"encoding/base64"
+	"fiberbackend/config"
+	"fiberbackend/internal/model"
+	"fiberbackend/internal/repository"
+	"fiberbackend/pkg/utils"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Service sentinel errors (deprecated: use pkg/utils errors)
+// Kept for backward compatibility, will be removed in future versions
 var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserExists         = errors.New("user already exists")
-	ErrUserNotFound       = errors.New("user not found")
-	ErrInvalidToken       = errors.New("invalid or expired token")
-	ErrTokenExpired       = errors.New("token has expired")
+	ErrInvalidCredentials = utils.ErrInvalidCredentials
+	ErrUserExists         = utils.ErrUserAlreadyExists
+	ErrUserNotFound       = utils.ErrUserNotFound
+	ErrInvalidToken       = utils.ErrInvalidToken
+	ErrTokenExpired       = utils.ErrTokenExpired
 )
 
 type AuthService interface {
@@ -39,6 +41,7 @@ type authService struct {
 	userRepo    repository.UserRepository
 	sessionRepo repository.SessionRepository
 	jwtSecret   []byte
+	jwtExpiry   time.Duration
 }
 
 func NewAuthService(authRepo repository.AuthRepository, userRepo repository.UserRepository, sessionRepo repository.SessionRepository, config *config.Config) AuthService {
@@ -47,6 +50,7 @@ func NewAuthService(authRepo repository.AuthRepository, userRepo repository.User
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		jwtSecret:   []byte(config.JWTSecret),
+		jwtExpiry:   time.Duration(config.JWTExpirationHrs) * time.Hour,
 	}
 }
 
@@ -107,7 +111,7 @@ func (s *authService) Login(ctx context.Context, email, password string) (string
 		"email":          user.Email,
 		"is_super_admin": user.IsSuperAdmin,
 		"iat":            time.Now().Unix(),
-		"exp":            time.Now().Add(6 * time.Hour).Unix(), // Token expires after 6 hours
+		"exp":            time.Now().Add(s.jwtExpiry).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
@@ -200,7 +204,7 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (st
 		"email":          user.Email,
 		"is_super_admin": user.IsSuperAdmin,
 		"iat":            time.Now().Unix(),
-		"exp":            time.Now().Add(6 * time.Hour).Unix(), // Token expires after 6 hours
+		"exp":            time.Now().Add(s.jwtExpiry).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 

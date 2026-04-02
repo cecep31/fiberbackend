@@ -6,7 +6,7 @@ FiberBackend is a modern REST API for a blog/content management system built wit
 
 ### Key Technologies
 - **Go**: 1.25+
-- **Fiber Framework**: v3.0.0
+- **Fiber Framework**: v3.1.0
 - **GORM**: v1.31.1 for database ORM
 - **PostgreSQL**: 14+ via pgx driver
 - **JWT Authentication**: github.com/golang-jwt/jwt/v5
@@ -29,8 +29,9 @@ The project follows a clean architecture pattern with separation of concerns:
 - **pkg/**: Shared utilities
   - **database/**: Database connection and wrapper
   - **response/**: Standardized response helpers
-  - **utils/**: General utility functions
+  - **utils/**: General utility functions (errors, validation)
   - **validator/**: Custom validator implementation
+  - **constants/**: Shared constants
 
 ## Building and Running
 
@@ -54,20 +55,22 @@ The project follows a clean architecture pattern with separation of concerns:
    # Server
    PORT=8080
 
+   # JWT configuration (required; must be at least 32 characters)
+   JWT_SECRET=change-this-to-a-secure-secret-at-least-32-chars
+
    # Database
    DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-   MAX_OPEN_CONNS=30
+
+   # Database connection pool settings
+   MAX_OPEN_CONNS=50
    MAX_IDLE_CONNS=2
-   CONN_MAX_LIFETIME=30m
+   CONN_MAX_LIFETIME=3m
 
-   # Authentication
-   JWT_SECRET=your-secret-key
-
-   # Rate Limiting
+   # Rate limiter configuration
    RATE_LIMITER_MAX=0
    RATE_LIMITER_TTL=60
 
-   # Debug
+   # Debug mode
    DEBUG=false
    ```
 
@@ -229,6 +232,7 @@ psql -d your_database -f migrations/001_*.sql
 - `pkg/database/setup.go` - Database connection with retry logic
 - `pkg/response/response.go` - Standardized HTTP response helpers
 - `pkg/utils/errors.go` - Application error types
+- `pkg/validator/validator.go` - Custom validator implementation
 - `.air.toml` - Development hot reload configuration
 - `.golangci.yml` - Linter configuration
 - `Dockerfile` - Multi-stage Docker build
@@ -244,3 +248,47 @@ The project implements a layered architecture with clear separation between:
 4. Data models (models)
 
 The dependency injection system in the `internal/di` package manages the lifecycle of all services and ensures loose coupling between components.
+
+## Models Overview
+
+The application includes the following core models:
+- **User**: User accounts with authentication, profiles, and social features
+- **Post**: Blog posts with rich content, tags, and versioning
+- **Comment**: Post comments with nested replies
+- **Tag**: Content categorization and tagging
+- **Profile**: Extended user profile information
+- **Session**: User session management for JWT refresh tokens
+- **PostView**: Post analytics and view tracking
+- **PostLike**: Post like/bookmark functionality
+- **PostBookmark**: Saved posts for users
+- **UserFollow**: User following/follower relationships
+- **ChatConversation**: AI chat conversations with message history
+- **ChatMessage**: Individual chat messages with token tracking
+- **Holding**: User holdings/investments tracking
+- **File**: File uploads and attachments
+
+## Middleware Stack
+
+The application uses the following middleware (in order):
+1. **Recover**: Panic recovery middleware
+2. **RequestID**: Adds unique request ID to each request
+3. **Helmet**: Security headers (CSP, X-Frame-Options, etc.)
+4. **Logger**: Request logging (debug mode only)
+5. **RateLimiter**: Rate limiting (when enabled)
+6. **CORS**: Cross-origin resource sharing
+7. **Auth**: JWT authentication for protected routes
+
+## Configuration Options
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `PORT` | Server port | `8080` |
+| `JWT_SECRET` | JWT signing secret (required, min 32 chars) | - |
+| `DATABASE_URL` | PostgreSQL connection string | `postgres://...` |
+| `MAX_OPEN_CONNS` | Max database connections | `30` |
+| `MAX_IDLE_CONNS` | Idle database connections | `1` |
+| `CONN_MAX_LIFETIME` | Connection max lifetime | `30m` |
+| `DB_SLOW_QUERY_THRESHOLD` | Slow query logging threshold | `300ms` |
+| `RATE_LIMITER_MAX` | Max requests per minute (0 = disabled) | `0` |
+| `RATE_LIMITER_TTL` | Rate limiter TTL in seconds | `60` |
+| `DEBUG` | Enable debug mode | `false` |

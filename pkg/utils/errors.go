@@ -88,3 +88,44 @@ func UnauthorizedError(message string, err error) *AppError {
 func ForbiddenError(message string, err error) *AppError {
 	return NewAppError(ErrCodeForbidden, message, err)
 }
+
+// ============================================================================
+// Domain Errors - Centralized error definitions for the application
+// ============================================================================
+
+// Auth Errors
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserAlreadyExists  = errors.New("user already exists")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidToken       = errors.New("invalid or expired token")
+	ErrTokenExpired       = errors.New("token has expired")
+)
+
+// User Errors
+var (
+	ErrEmailAlreadyExists = errors.New("email already exists")
+	ErrUsernameTaken      = errors.New("username is already taken")
+)
+
+// Post Errors
+var (
+	ErrPostNotFound = errors.New("post not found")
+)
+
+// Comment Errors
+var (
+	ErrCommentNotFound = errors.New("comment not found")
+)
+
+// Tag Errors
+var (
+	ErrTagNotFound = errors.New("tag not found")
+	ErrTagExists   = errors.New("tag already exists")
+)
+
+// Session Errors
+var (
+	ErrSessionNotFound = errors.New("session not found")
+	ErrSessionExpired  = errors.New("session has expired")
+)

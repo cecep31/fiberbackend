@@ -16,6 +16,7 @@ var messages = map[string]string{
 	"min":      "%s must be at least %s characters long",
 	"max":      "%s must not exceed %s characters",
 	"oneof":    "%s must be one of [%s]",
+	"password": "%s must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
 	"default":  "%s failed validation for tag %s",
 }
 
@@ -45,7 +46,39 @@ func (v ValidationErrors) Error() string {
 
 func NewValidator() *CustomValidator {
 	v := validator.New()
+
+	// Register custom password validator
+	v.RegisterValidation("password", validatePassword)
+
 	return &CustomValidator{validator: v}
+}
+
+// validatePassword validates that password meets security requirements:
+// - At least 8 characters
+// - At least one uppercase letter
+// - At least one lowercase letter
+// - At least one number
+// - At least one special character
+func validatePassword(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+	if len(password) < 8 {
+		return false
+	}
+
+	var hasUpper, hasLower, hasNumber, hasSpecial bool
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsLower(char):
+			hasLower = true
+		case unicode.IsNumber(char):
+			hasNumber = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+	}
+	return hasUpper && hasLower && hasNumber && hasSpecial
 }
 
 func (cv *CustomValidator) Validate(out any) error {
@@ -82,6 +115,8 @@ func getErrorMessage(e validator.FieldError) string {
 		return fmt.Sprintf(messages["max"], fieldName, e.Param())
 	case "oneof":
 		return fmt.Sprintf(messages["oneof"], fieldName, e.Param())
+	case "password":
+		return fmt.Sprintf(messages["password"], fieldName)
 	default:
 		return fmt.Sprintf(messages["default"], fieldName, e.Tag())
 	}

@@ -1,10 +1,11 @@
 package handler
 
 import (
-	"fiberbackend/internal/service"
-	"fiberbackend/pkg/response"
 	"fmt"
 	"strconv"
+
+	"fiberbackend/internal/service"
+	"fiberbackend/pkg/response"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"

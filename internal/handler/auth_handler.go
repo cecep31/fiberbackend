@@ -1,9 +1,10 @@
 package handler
 
 import (
+	"net/http"
+
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"net/http"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -14,13 +15,13 @@ type AuthHandler struct {
 
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6"`
+	Password string `json:"password" validate:"required,min=8"`
 }
 
 type RegisterRequest struct {
 	Email    string `json:"email" validate:"required,email"`
 	Username string `json:"username" validate:"required,min=3,max=30"`
-	Password string `json:"password" validate:"required,min=6"`
+	Password string `json:"password" validate:"required,min=8,password"`
 }
 
 type CheckUsernameRequest struct {
@@ -33,7 +34,7 @@ type ForgotPasswordRequest struct {
 
 type ResetPasswordRequest struct {
 	Token    string `json:"token" validate:"required"`
-	Password string `json:"password" validate:"required,min=6"`
+	Password string `json:"password" validate:"required,min=8,password"`
 }
 
 type RefreshTokenRequest struct {
@@ -41,8 +42,8 @@ type RefreshTokenRequest struct {
 }
 
 type ChangePasswordRequest struct {
-	CurrentPassword string `json:"current_password" validate:"required,min=6"`
-	NewPassword     string `json:"new_password" validate:"required,min=6"`
+	CurrentPassword string `json:"current_password" validate:"required,min=8"`
+	NewPassword     string `json:"new_password" validate:"required,min=8,password"`
 }
 
 func NewAuthHandler(authService service.AuthService) *AuthHandler {
