@@ -10,7 +10,7 @@ func (r *Routes) setupPostRoutes(v1 fiber.Router) {
 		posts.Get("", r.postHandler.GetPosts)
 		posts.Get("/random", r.postHandler.GetPostsRandom)
 		posts.Get("/mine", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
-		posts.Get("/username/:username", r.postHandler.GetPostsByUsername)
+		posts.Get("/author/:username", r.postHandler.GetPostsByUsername)
 		posts.Get("/u/:username/:slug", r.postHandler.GetPostBySlugAndUsername)
 		posts.Get("/tag/:tag", r.postHandler.GetPostsByTag)
 
