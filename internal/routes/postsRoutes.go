@@ -1,9 +1,18 @@
 package routes
 
-import "github.com/gofiber/fiber/v3"
+import (
+	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
+)
 
 func (r *Routes) setupPostRoutes(v1 fiber.Router) {
 	posts := v1.Group("/posts")
+	sitemapLimiter := limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+	})
 	{
 		// Static routes must come BEFORE parameterized routes
 		posts.Post("", r.authMiddleware.Auth(), r.postHandler.CreatePost)
@@ -13,6 +22,7 @@ func (r *Routes) setupPostRoutes(v1 fiber.Router) {
 		posts.Get("/author/:username", r.postHandler.GetPostsByUsername)
 		posts.Get("/u/:username/:slug", r.postHandler.GetPostBySlugAndUsername)
 		posts.Get("/tag/:tag", r.postHandler.GetPostsByTag)
+		posts.Get("/sitemap", sitemapLimiter, r.postHandler.GetPostsSitemap)
 
 		// Parameterized routes must come AFTER static routes
 		posts.Get("/:id", r.postHandler.GetPost)

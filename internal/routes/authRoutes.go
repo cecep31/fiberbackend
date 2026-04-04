@@ -10,8 +10,8 @@ import (
 func (r *Routes) setupAuthRoutes(v1 fiber.Router) {
 	auth := v1.Group("/auth")
 	loginLimiter := limiter.New(limiter.Config{
-		Max:        5,
-		Expiration: 5 * time.Minute,
+		Max:        3,
+		Expiration: 10 * time.Minute,
 	})
 	{
 		auth.Post("/register", r.authHandler.Register)

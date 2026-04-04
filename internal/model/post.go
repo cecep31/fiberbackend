@@ -30,6 +30,14 @@ func (Post) TableName() string {
 	return "posts"
 }
 
+// PostSitemapEntry holds minimal post fields for sitemap generation (public URLs only).
+type PostSitemapEntry struct {
+	Slug      *string    `json:"slug"`
+	Username  *string    `json:"username"`
+	CreatedAt *time.Time `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at"`
+}
+
 type PostResponse struct {
 	ID        string        `json:"id"`
 	Title     *string       `json:"title"`

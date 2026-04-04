@@ -29,8 +29,9 @@ type Config struct {
 	ConnMaxLifetime    time.Duration
 	SlowQueryThreshold time.Duration
 
-	// Rate limiter (0 = disabled)
+	// Rate limiter (0 = disabled). Max = max requests per IP per TTL window.
 	RateLimiterMax int
+	// RateLimiterTTL is the sliding window length in seconds (maps to limiter Expiration).
 	RateLimiterTTL int
 
 	Debug bool

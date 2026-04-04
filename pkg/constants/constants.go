@@ -19,6 +19,10 @@ const (
 	RandomPostsDefaultLimit = 6
 	// RandomPostsMaxLimit is the maximum limit for random posts
 	RandomPostsMaxLimit = 20
+	// SitemapDefaultLimit is the default page size for GET /v1/posts/sitemap
+	SitemapDefaultLimit = 1000
+	// SitemapMaxLimit is the maximum page size for GET /v1/posts/sitemap
+	SitemapMaxLimit = 5000
 )
 
 // JWT-related constants

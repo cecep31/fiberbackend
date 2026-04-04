@@ -56,11 +56,15 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 		return err
 	})
 
-	// Enhanced rate limiting with custom store and configuration
+	// Global rate limit per IP (429 when exceeded). TTL = window length in seconds.
 	if config.RateLimiterMax > 0 {
+		ttl := config.RateLimiterTTL
+		if ttl <= 0 {
+			ttl = 60
+		}
 		app.Use(limiter.New(limiter.Config{
 			Max:        config.RateLimiterMax,
-			Expiration: 1 * time.Minute,
+			Expiration: time.Duration(ttl) * time.Second,
 		}))
 	}
 

@@ -200,6 +200,45 @@ func (h *PostHandler) GetPostsRandom(c fiber.Ctx) error {
 	return response.Success(c, "Successfully retrieved posts", posts)
 }
 
+func (h *PostHandler) GetPostsSitemap(c fiber.Ctx) error {
+	offset := c.Query("offset")
+	limit := c.Query("limit")
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil || offsetInt < 0 {
+		offsetInt = constants.DefaultOffset
+	}
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil || limitInt <= 0 {
+		limitInt = constants.SitemapDefaultLimit
+	}
+	if limitInt > constants.SitemapMaxLimit {
+		limitInt = constants.SitemapMaxLimit
+	}
+
+	posts, total, err := h.postService.GetPostsSitemap(c.Context(), limitInt, offsetInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get posts sitemap", err)
+	}
+	if posts == nil {
+		posts = []model.PostSitemapEntry{}
+	}
+
+	totalInt := int(total)
+	meta := response.PaginationMeta{
+		TotalItems: totalInt,
+		Offset:     offsetInt,
+		Limit:      limitInt,
+		TotalPages: totalInt/limitInt + 1,
+	}
+	if limitInt > 0 && totalInt%limitInt == 0 {
+		meta.TotalPages = totalInt / limitInt
+	}
+
+	return response.SuccessWithMeta(c, "Successfully retrieved posts sitemap", struct {
+		Posts []model.PostSitemapEntry `json:"posts"`
+	}{Posts: posts}, meta)
+}
+
 func (h *PostHandler) GetMyPosts(c fiber.Ctx) error {
 	offset := c.Query("offset")
 	limit := c.Query("limit")
