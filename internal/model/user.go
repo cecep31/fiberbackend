@@ -68,21 +68,22 @@ func (u *User) ToSummary() *UserSummary {
 
 // UserResponse represents the user data that can be safely sent to clients
 type UserResponse struct {
-	ID             string     `json:"id"`
-	Email          string     `json:"email"`
-	Name           string     `json:"name"`
-	Username       *string    `json:"username"`
-	Image          *string    `json:"image"`
-	IsSuperAdmin   *bool      `json:"is_super_admin"`
-	FirstName      *string    `json:"first_name"`
-	LastName       *string    `json:"last_name"`
-	GithubID       *int64     `json:"github_id"`
-	FollowersCount int64      `json:"followers_count"`
-	FollowingCount int64      `json:"following_count"`
-	IsFollowing    *bool      `json:"is_following,omitempty"` // Whether current user follows this user
-	CreatedAt      *time.Time `json:"created_at"`
-	UpdatedAt      *time.Time `json:"updated_at"`
-	DeletedAt      *time.Time `json:"deleted_at,omitempty"` // Keep as *time.Time for response flexibility
+	ID             string           `json:"id"`
+	Email          string           `json:"email"`
+	Name           string           `json:"name"`
+	Username       *string          `json:"username"`
+	Image          *string          `json:"image"`
+	IsSuperAdmin   *bool            `json:"is_super_admin"`
+	FirstName      *string          `json:"first_name"`
+	LastName       *string          `json:"last_name"`
+	GithubID       *int64           `json:"github_id"`
+	FollowersCount int64            `json:"followers_count"`
+	FollowingCount int64            `json:"following_count"`
+	IsFollowing    *bool            `json:"is_following,omitempty"` // Whether current user follows this user
+	Profile        *ProfileResponse `json:"profile,omitempty"`
+	CreatedAt      *time.Time       `json:"created_at"`
+	UpdatedAt      *time.Time       `json:"updated_at"`
+	DeletedAt      *time.Time       `json:"deleted_at,omitempty"` // Keep as *time.Time for response flexibility
 }
 
 // ToResponse converts a User model to a UserResponse
@@ -91,7 +92,7 @@ func (u *User) ToResponse() *UserResponse {
 	if u.FirstName != nil && u.LastName != nil {
 		name = *u.FirstName + " " + *u.LastName
 	}
-	return &UserResponse{
+	resp := &UserResponse{
 		ID:             u.ID,
 		Email:          u.Email,
 		Name:           name,
@@ -108,6 +109,10 @@ func (u *User) ToResponse() *UserResponse {
 		// Convert gorm.DeletedAt to *time.Time for the response
 		DeletedAt: convertDeletedAtToTime(u.DeletedAt),
 	}
+	if u.Profile != nil {
+		resp.Profile = u.Profile.ToResponse()
+	}
+	return resp
 }
 
 // convertDeletedAtToTime helper function

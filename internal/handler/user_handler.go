@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"context"
+	"errors"
+
+	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
 	"fiberbackend/pkg/utils"
@@ -34,6 +38,43 @@ func (h *UserHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, "Successfully retrieved user", userResponse)
+}
+
+// GetByUsername returns a public user profile by username with profile details preloaded.
+// When the caller is authenticated, follow status relative to the target user is included.
+func (h *UserHandler) GetByUsername(c fiber.Ctx) error {
+	username := c.Params("username")
+	if username == "" {
+		return response.BadRequest(c, "Username is required", nil)
+	}
+
+	currentUserID, _ := utils.GetUserIDFromContext(c)
+
+	userResponse, err := h.userService.GetByUsernameWithProfile(c.Context(), username)
+	if err != nil {
+		if errors.Is(err, utils.ErrUserNotFound) {
+			return response.NotFound(c, "User not found", err)
+		}
+		return response.InternalServerError(c, "Failed to retrieve user", err)
+	}
+
+	if err := h.attachFollowStatusIfViewer(c.Context(), currentUserID, userResponse); err != nil {
+		return response.InternalServerError(c, "Failed to retrieve user", err)
+	}
+
+	return response.Success(c, "Successfully retrieved user", userResponse)
+}
+
+func (h *UserHandler) attachFollowStatusIfViewer(ctx context.Context, viewerID string, target *model.UserResponse) error {
+	if viewerID == "" || viewerID == target.ID {
+		return nil
+	}
+	isFollowing, err := h.userFollowService.IsFollowing(ctx, viewerID, target.ID)
+	if err != nil {
+		return err
+	}
+	target.IsFollowing = &isFollowing
+	return nil
 }
 
 func (h *UserHandler) GetUsers(c fiber.Ctx) error {

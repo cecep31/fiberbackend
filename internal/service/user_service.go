@@ -10,6 +10,7 @@ import (
 
 type UserService interface {
 	GetByID(ctx context.Context, id string) (*model.UserResponse, error)
+	GetByUsernameWithProfile(ctx context.Context, username string) (*model.UserResponse, error)
 	GetUsers(ctx context.Context, offset int, limit int) ([]*model.UserResponse, int64, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -26,6 +27,14 @@ func (s *userService) GetByID(ctx context.Context, id string) (*model.UserRespon
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by id: %w", err)
+	}
+	return user.ToResponse(), nil
+}
+
+func (s *userService) GetByUsernameWithProfile(ctx context.Context, username string) (*model.UserResponse, error) {
+	user, err := s.userRepo.GetByUsernameWithProfile(ctx, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by username: %w", err)
 	}
 	return user.ToResponse(), nil
 }

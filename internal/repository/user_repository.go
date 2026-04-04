@@ -24,6 +24,7 @@ type UserRepository interface {
 	GetUsersByEmail(ctx context.Context, email string) ([]*model.User, error)
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
+	GetByUsernameWithProfile(ctx context.Context, username string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) error
 	UpdatePartial(ctx context.Context, id string, updates map[string]interface{}) error
 	SoftDeleteByID(ctx context.Context, id string) error
@@ -186,6 +187,18 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.U
 func (r *userRepository) GetByUsername(ctx context.Context, username string) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).Where("username = ?", username).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by username: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *userRepository) GetByUsernameWithProfile(ctx context.Context, username string) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).Preload("Profile").Where("username = ?", username).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound

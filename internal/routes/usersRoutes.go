@@ -6,6 +6,7 @@ func (r *Routes) setupUserRoutes(v1 fiber.Router) {
 	users := v1.Group("/users")
 	{
 		// Public routes
+		users.Get("/username/:username", r.userHandler.GetByUsername)
 		users.Get("/:id", r.userHandler.GetByID)
 
 		// Authenticated routes
