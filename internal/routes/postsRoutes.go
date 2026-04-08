@@ -17,6 +17,7 @@ func (r *Routes) setupPostRoutes(v1 fiber.Router) {
 		// Static routes must come BEFORE parameterized routes
 		posts.Post("", r.authMiddleware.Auth(), r.postHandler.CreatePost)
 		posts.Get("", r.postHandler.GetPosts)
+		posts.Get("/trending", r.postHandler.GetPostsTrending)
 		posts.Get("/random", r.postHandler.GetPostsRandom)
 		posts.Get("/mine", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
 		posts.Get("/author/:username", r.postHandler.GetPostsByUsername)

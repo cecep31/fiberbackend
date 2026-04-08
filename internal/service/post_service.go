@@ -20,6 +20,7 @@ type PostService interface {
 	GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.PostResponse, int64, error)
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.PostResponse, int64, error)
 	GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error)
+	GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.PostResponse, int64, error)
 	DeletePostByID(ctx context.Context, id string) error
 	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
 	UpdatePost(ctx context.Context, id string, post *model.UpdatePostDTO) (*model.Post, error)
@@ -274,6 +275,27 @@ func (s *postService) GetPostsSitemap(ctx context.Context, limit, offset int) ([
 		return nil, 0, fmt.Errorf("failed to get posts sitemap: %w", err)
 	}
 	return entries, total, nil
+}
+
+func (s *postService) GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.PostResponse, int64, error) {
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	posts, total, err := s.postRepo.GetPostsTrending(ctx, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	postsResponse := make([]*model.PostResponse, 0, len(posts))
+	for _, post := range posts {
+		postsResponse = append(postsResponse, post.ToResponse())
+	}
+
+	return postsResponse, total, nil
 }
 
 // findOrCreateTagByName finds an existing tag by name or creates a new one

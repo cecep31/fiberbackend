@@ -35,6 +35,7 @@ type PostRepository interface {
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.Post, int64, error)
 	ExistsByID(ctx context.Context, id string) (bool, error)
 	GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error)
+	GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error)
 }
 
 type postRepository struct {
@@ -540,5 +541,30 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 		return nil, 0, fmt.Errorf("failed to get filtered posts: %w", err)
 	}
 
+	return posts, count, nil
+}
+
+// GetPostsTrending fetches trending posts based on views and likes
+func (r *postRepository) GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error) {
+	var count int64
+	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
+		Where("published = ?", true).
+		Count(&count).Error
+	if countErr != nil {
+		return nil, 0, fmt.Errorf("failed to count trending posts: %w", countErr)
+	}
+
+	var posts []*model.Post
+	err := r.db.WithContext(ctx).Model(&model.Post{}).
+		Preload("User").
+		Preload("Tags").
+		Where("published = ?", true).
+		Order("(like_count * 2 + view_count) DESC, created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&posts).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get trending posts: %w", err)
+	}
 	return posts, count, nil
 }

@@ -358,3 +358,43 @@ func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 
 	return response.SuccessWithMeta(c, "success retrieving posts by tag", posts, meta)
 }
+
+func (h *PostHandler) GetPostsTrending(c fiber.Ctx) error {
+	offset := c.Query("offset")
+	limit := c.Query("limit")
+	offsetInt, err := strconv.Atoi(offset)
+	if err != nil || offsetInt < 0 {
+		offsetInt = constants.DefaultOffset
+	}
+	limitInt, err := strconv.Atoi(limit)
+	if err != nil || limitInt <= 0 {
+		limitInt = 5
+	}
+	if limitInt > constants.MaxLimit {
+		limitInt = constants.MaxLimit
+	}
+	posts, total, err := h.postService.GetPostsTrending(c.Context(), limitInt, offsetInt)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get trending posts", err)
+	}
+
+	for _, post := range posts {
+		if post.Body != nil && len(*post.Body) > constants.PostBodyTruncateLength {
+			truncated := (*post.Body)[:constants.PostBodyTruncateLength] + " ..."
+			post.Body = &truncated
+		}
+	}
+
+	totalInt := int(total)
+	meta := response.PaginationMeta{
+		TotalItems: totalInt,
+		Offset:     offsetInt,
+		Limit:      limitInt,
+		TotalPages: totalInt/limitInt + 1,
+	}
+	if limitInt > 0 && totalInt%limitInt == 0 {
+		meta.TotalPages = totalInt / limitInt
+	}
+
+	return response.SuccessWithMeta(c, "success retrieving trending posts", posts, meta)
+}
