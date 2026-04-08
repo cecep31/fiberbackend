@@ -19,6 +19,7 @@ type Post struct {
 	Published     *bool          `json:"published" gorm:"default:true"`
 	ViewCount     int64          `json:"view_count" gorm:"type:bigint;default:0"`
 	LikeCount     int64          `json:"like_count" gorm:"type:bigint;default:0"`
+	BookmarkCount int64          `json:"bookmark_count" gorm:"type:bigint;default:0"`
 	PostComments  []PostComment  `gorm:"foreignKey:PostID"`
 	PostLikes     []PostLike     `gorm:"foreignKey:PostID"`
 	PostBookmarks []PostBookmark `gorm:"foreignKey:PostID"`
@@ -39,19 +40,20 @@ type PostSitemapEntry struct {
 }
 
 type PostResponse struct {
-	ID        string        `json:"id"`
-	Title     *string       `json:"title"`
-	Photo_url *string       `json:"photo_url"`
-	Body      *string       `json:"body"`
-	Slug      *string       `json:"slug"`
-	ViewCount int64         `json:"view_count"`
-	LikeCount int64         `json:"like_count"`
-	Published *bool         `json:"published"`
-	User      *UserSummary  `json:"user,omitempty"`
-	Tags      []TagResponse `json:"tags"`
-	CreatedAt *time.Time    `json:"created_at"`
-	UpdatedAt *time.Time    `json:"updated_at"`
-	DeletedAt *time.Time    `json:"deleted_at,omitempty"`
+	ID            string        `json:"id"`
+	Title         *string       `json:"title"`
+	Photo_url     *string       `json:"photo_url"`
+	Body          *string       `json:"body"`
+	Slug          *string       `json:"slug"`
+	ViewCount     int64         `json:"view_count"`
+	LikeCount     int64         `json:"like_count"`
+	BookmarkCount int64         `json:"bookmark_count"`
+	Published     *bool         `json:"published"`
+	User          *UserSummary  `json:"user,omitempty"`
+	Tags          []TagResponse `json:"tags"`
+	CreatedAt     *time.Time    `json:"created_at"`
+	UpdatedAt     *time.Time    `json:"updated_at"`
+	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`
 }
 
 func (p *Post) ToResponse() *PostResponse {
@@ -74,19 +76,20 @@ func (p *Post) ToResponse() *PostResponse {
 	}
 
 	return &PostResponse{
-		ID:        p.ID,
-		Title:     p.Title,
-		Photo_url: p.PhotoURL,
-		Body:      p.Body,
-		Slug:      p.Slug,
-		ViewCount: p.ViewCount,
-		LikeCount: p.LikeCount,
-		Published: p.Published,
-		User:      userResp,
-		Tags:      tagResponses,
-		CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt,
-		DeletedAt: deletedAtTime,
+		ID:            p.ID,
+		Title:         p.Title,
+		Photo_url:     p.PhotoURL,
+		Body:          p.Body,
+		Slug:          p.Slug,
+		ViewCount:     p.ViewCount,
+		LikeCount:     p.LikeCount,
+		BookmarkCount: p.BookmarkCount,
+		Published:     p.Published,
+		User:          userResp,
+		Tags:          tagResponses,
+		CreatedAt:     p.CreatedAt,
+		UpdatedAt:     p.UpdatedAt,
+		DeletedAt:     deletedAtTime,
 	}
 }
 
@@ -124,12 +127,13 @@ type PostQueryFilter struct {
 // ValidSortFields defines allowed sort fields
 func (f *PostQueryFilter) ValidSortFields() map[string]string {
 	return map[string]string{
-		"id":         "posts.id",
-		"title":      "posts.title",
-		"created_at": "posts.created_at",
-		"updated_at": "posts.updated_at",
-		"view_count": "posts.view_count",
-		"like_count": "posts.like_count",
+		"id":             "posts.id",
+		"title":          "posts.title",
+		"created_at":     "posts.created_at",
+		"updated_at":     "posts.updated_at",
+		"view_count":     "posts.view_count",
+		"like_count":     "posts.like_count",
+		"bookmark_count": "posts.bookmark_count",
 	}
 }
 
