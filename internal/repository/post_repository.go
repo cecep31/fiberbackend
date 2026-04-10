@@ -34,7 +34,7 @@ type PostRepository interface {
 	SearchPosts(ctx context.Context, keyword string, limit int, offset int) ([]*model.Post, int64, error)
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.Post, int64, error)
 	ExistsByID(ctx context.Context, id string) (bool, error)
-	GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error)
+	GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error)
 	GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error)
 }
 
@@ -394,7 +394,7 @@ func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit in
 }
 
 // GetPostsSitemap returns slug, author username, and timestamps for published posts (sitemap URLs).
-func (r *postRepository) GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error) {
+func (r *postRepository) GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error) {
 	var total int64
 	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
 		Joins("JOIN users ON users.id = posts.created_by").
@@ -405,14 +405,15 @@ func (r *postRepository) GetPostsSitemap(ctx context.Context, limit, offset int)
 	}
 
 	var entries []model.PostSitemapEntry
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
+	query := r.db.WithContext(ctx).Model(&model.Post{}).
 		Select("posts.slug, users.username, posts.created_at, posts.updated_at").
 		Joins("JOIN users ON users.id = posts.created_by").
 		Where("posts.published = ?", true).
-		Order("posts.updated_at DESC").
-		Limit(limit).
-		Offset(offset).
-		Scan(&entries).Error
+		Order("posts.updated_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	err := query.Scan(&entries).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts for sitemap: %w", err)
 	}

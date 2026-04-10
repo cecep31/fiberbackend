@@ -19,7 +19,7 @@ type PostService interface {
 	GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.PostResponse, error)
 	GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.PostResponse, int64, error)
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.PostResponse, int64, error)
-	GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error)
+	GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error)
 	GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.PostResponse, int64, error)
 	DeletePostByID(ctx context.Context, id string) error
 	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
@@ -259,18 +259,14 @@ func (s *postService) GetPostsFiltered(ctx context.Context, filter *model.PostQu
 	return postsResponse, total, nil
 }
 
-func (s *postService) GetPostsSitemap(ctx context.Context, limit, offset int) ([]model.PostSitemapEntry, int64, error) {
-	if limit <= 0 {
-		limit = constants.SitemapDefaultLimit
-	}
-	if limit > constants.SitemapMaxLimit {
-		limit = constants.SitemapMaxLimit
-	}
-	if offset < 0 {
-		offset = constants.DefaultOffset
+func (s *postService) GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error) {
+	if limit > 0 {
+		if limit > constants.SitemapMaxLimit {
+			limit = constants.SitemapMaxLimit
+		}
 	}
 
-	entries, total, err := s.postRepo.GetPostsSitemap(ctx, limit, offset)
+	entries, total, err := s.postRepo.GetPostsSitemap(ctx, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts sitemap: %w", err)
 	}
