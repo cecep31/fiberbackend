@@ -74,9 +74,6 @@ A modern REST API for a blog/content management system built with Go, Fiber fram
 make build
 make dev
 
-# Run tests
-make test
-
 # Code quality
 make fmt
 make vet
@@ -108,7 +105,6 @@ For detailed API endpoints and examples, see [api_doc.md](api_doc.md).
 │   ├── middleware/         # HTTP middleware
 │   └── routes/             # Route definitions
 ├── migrations/             # Database migrations
-├── test/                   # Test files
 └── pkg/                    # Shared utilities
 ```
 
@@ -122,7 +118,7 @@ This project follows a clean architecture pattern with separation of concerns be
 4. Push to branch: `git push origin feature/my-feature`
 5. Submit a pull request
 
-Please follow existing code style and include tests for new features.
+Please follow existing code style.
 
 ## License
 

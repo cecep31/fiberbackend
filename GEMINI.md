@@ -55,18 +55,11 @@ The project adheres to a clean architecture (Handler → Service → Repository 
     go mod download
     ```
 
-3.  **Run the Application:**
+3.  Run the Application:
     *   **Directly:** `go run cmd/main.go`
     *   **With Hot Reloading:** `air` (Uses `.air.toml` configuration)
 
-4.  **Testing:**
-    ```bash
-    go test ./...                   # Run all tests
-    go test -v ./...                # Verbose output
-    go test -cover ./...            # With coverage
-    ```
-
-5.  **Linting & Quality:**
+4.  Linting & Quality:
     ```bash
     golangci-lint run               # Run all linters (see .golangci.yml)
     go vet ./...                    # Vet all packages
@@ -74,7 +67,7 @@ The project adheres to a clean architecture (Handler → Service → Repository 
     ```
 
 ### TODO: Makefile
-The `README.md` references a `Makefile` with commands like `make build`, `make dev`, `make test`, `make fmt`, and `make lint`, but no `Makefile` was found in the repository root. Developers should use the `go` commands listed above until a `Makefile` is implemented.
+The `README.md` references a `Makefile` with commands like `make build`, `make dev`, `make fmt`, and `make lint`, but no `Makefile` was found in the repository root. Developers should use the `go` commands listed above until a `Makefile` is implemented.
 
 ## Development Conventions
 
@@ -88,20 +81,15 @@ The `README.md` references a `Makefile` with commands like `make build`, `make d
 *   **Formatting:** Use `gofmt`. Max line length is 140 characters (per `.golangci.yml`).
 
 ### API Practices
-*   **Versioning:** All API endpoints are prefixed with `/v1` (defined in `internal/routes/routes.go`).
+ *   **Versioning:** All API endpoints are prefixed with `/api` (defined in `internal/routes/routes.go`).
 *   **JSON Responses:** Use `pkg/response` helpers for consistent API output.
 *   **Validation:** Use `go-playground/validator` tags in request structs. Handle binding errors with `response.HandleBindError(c, err)`.
 *   **Error Handling:** Return early on errors. Wrap errors with context: `fmt.Errorf("context: %w", err)`.
 
-### Testing
-*   Table-driven tests are preferred.
-*   Use `github.com/stretchr/testify/assert` for assertions.
-*   Tests are located in the `test/` directory and alongside source files.
-
 ## API Structure
 
-*   **Auth:** `/v1/auth/*` (Register, Login, Refresh, Password management)
-*   **Posts:** `/v1/posts/*` (CRUD, Comments, Likes, Views, Tag filtering)
-*   **Users:** `/v1/users/*` (Profile, Following)
-*   **Chat:** `/v1/chat/conversations/*` (Conversational AI management)
-*   **Holdings:** `/v1/holdings/*` (Asset tracking)
+ *   **Auth:** `/api/auth/*` (Register, Login, Refresh, Password management)
+ *   **Posts:** `/api/posts/*` (CRUD, Comments, Likes, Views, Tag filtering)
+ *   **Users:** `/api/users/*` (Profile, Following)
+ *   **Chat:** `/api/chat/conversations/*` (Conversational AI management)
+ *   **Holdings:** `/api/holdings/*` (Asset tracking)

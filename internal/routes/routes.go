@@ -55,7 +55,7 @@ func NewRoutes(
 
 func (r *Routes) Setup(app *fiber.App) {
 	// API Group
-	v1 := app.Group("/v1")
+	v1 := app.Group("/api")
 	r.setupV1Routes(v1)
 }
 
