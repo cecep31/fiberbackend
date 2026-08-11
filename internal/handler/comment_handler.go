@@ -1,10 +1,9 @@
 package handler
 
 import (
-	"fiberbackend/internal/model"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/utils"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,24 +18,27 @@ func NewCommentHandler(commentService service.CommentService) *CommentHandler {
 	}
 }
 
-// CreateComment handles creating a new comment on a post
 func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	var dto model.CreatePostCommentDTO
-	if err := c.Bind().Body(&dto); err != nil {
-		return response.HandleBindError(c, err)
+	var commentDTO dto.CreateCommentRequest
+	if err := c.Bind().Body(&commentDTO); err != nil {
+		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
-		return response.Unauthorized(c, "Invalid or missing user context")
+	if err := bindValidate(c, &commentDTO); err != nil {
+		return err
 	}
 
-	comment, err := h.commentService.CreateComment(c.Context(), postID, &dto, userID)
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	comment, err := h.commentService.CreateComment(c.Context(), postID, &commentDTO, userID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to create comment", err)
 	}
@@ -44,7 +46,6 @@ func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 	return response.Created(c, "Comment created successfully", comment)
 }
 
-// GetCommentsByPostID handles getting all comments for a specific post
 func (h *CommentHandler) GetCommentsByPostID(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
@@ -59,24 +60,27 @@ func (h *CommentHandler) GetCommentsByPostID(c fiber.Ctx) error {
 	return response.Success(c, "Comments fetched successfully", comments)
 }
 
-// UpdateComment handles updating a comment
 func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 	commentID := c.Params("comment_id")
 	if commentID == "" {
 		return response.BadRequest(c, "Comment ID is required", nil)
 	}
 
-	var dto model.CreatePostCommentDTO
-	if err := c.Bind().Body(&dto); err != nil {
-		return response.HandleBindError(c, err)
+	var commentDTO dto.CreateCommentRequest
+	if err := c.Bind().Body(&commentDTO); err != nil {
+		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
-		return response.Unauthorized(c, "Invalid or missing user context")
+	if err := bindValidate(c, &commentDTO); err != nil {
+		return err
 	}
 
-	comment, err := h.commentService.UpdateComment(c.Context(), commentID, dto.Text, userID)
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	comment, err := h.commentService.UpdateComment(c.Context(), commentID, commentDTO.Text, userID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to update comment", err)
 	}
@@ -84,16 +88,15 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 	return response.Success(c, "Comment updated successfully", comment)
 }
 
-// DeleteComment handles deleting a comment
 func (h *CommentHandler) DeleteComment(c fiber.Ctx) error {
 	commentID := c.Params("comment_id")
 	if commentID == "" {
 		return response.BadRequest(c, "Comment ID is required", nil)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
-		return response.Unauthorized(c, "Invalid or missing user context")
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
 	}
 
 	if err := h.commentService.DeleteComment(c.Context(), commentID, userID); err != nil {

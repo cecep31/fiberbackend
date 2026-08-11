@@ -1,38 +1,38 @@
 # --- Builder Stage ---
 FROM golang:1.26-alpine AS builder
 
-# Set the working directory
 WORKDIR /app
 
-# Copy go.mod and go.sum files
+# Download dependencies first (layer cache)
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy the rest of the source code
+# Copy source and build
 COPY . .
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/main cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o bin/main cmd/main.go
 
 # --- Final Stage ---
-FROM alpine:latest
+FROM alpine:3.24
+
+# Install CA certificates for TLS connections (S3, Valkey, external APIs)
+# and wget for the Docker HEALTHCHECK below.
+RUN apk add --no-cache ca-certificates wget
 
 # Create a non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN addgroup -S appgroup && adduser -S -G appgroup appuser
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /app/bin/main .
+# Copy binary with correct ownership
+COPY --from=builder --chown=appuser:appgroup /app/bin/main .
 
-# Expose the application port
 EXPOSE 8080
 
-# Set the user
 USER appuser
 
-# Run the application
+# Healthcheck — Docker and orchestrators use this for liveness detection.
+# /health is registered in main.go.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/bin/sh", "-c", "wget -qO- http://localhost:8080/health || exit 1"]
+
 CMD ["./main"]

@@ -1,20 +1,23 @@
 package routes
 
-import "github.com/gofiber/fiber/v3"
+import (
+	"github.com/gofiber/fiber/v3"
+)
 
-func (r *Routes) setupUserRoutes(v1 fiber.Router) {
-	users := v1.Group("/users")
+func (r *Routes) setupUserRoutes(api fiber.Router) {
+	users := api.Group("/users")
 	{
 		// Public routes
 		users.Get("/username/:username", r.userHandler.GetByUsername)
-		users.Get("/:id", r.userHandler.GetByID)
 
 		// Authenticated routes
 		authUsers := users.Group("", r.authMiddleware.Auth())
 		{
 			authUsers.Get("/me", r.userHandler.GetMe)
 			authUsers.Get("", r.authMiddleware.AuthAdmin(), r.userHandler.GetUsers)
+			authUsers.Get("/:id", r.authMiddleware.AuthAdmin(), r.userHandler.GetByID)
 			authUsers.Delete("/:id", r.authMiddleware.AuthAdmin(), r.userHandler.DeleteUser)
+			authUsers.Post("/:id/restore", r.authMiddleware.AuthAdmin(), r.userHandler.RestoreUser)
 
 			// Follow routes
 			authUsers.Post("/follow", r.userFollowHandler.FollowUser)

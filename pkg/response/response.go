@@ -1,17 +1,16 @@
 package response
 
 import (
-	"log/slog"
+	"errors"
 	"net/http"
 
-	"fiberbackend/pkg/logger"
+	"fiberbackend/pkg/applog"
 	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
 
-// apiLogger is the logger for response package
-var apiLogger = logger.New(slog.LevelInfo, "text", false)
+var log = applog.Component("api")
 
 // APIResponse represents the standard API response format
 type APIResponse struct {
@@ -19,6 +18,7 @@ type APIResponse struct {
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Errors  any    `json:"errors,omitempty"`
 	Meta    any    `json:"meta,omitempty"`
 }
 
@@ -32,11 +32,6 @@ type PaginationMeta struct {
 
 // Success sends a successful response
 func Success(c fiber.Ctx, message string, data any) error {
-	apiLogger.Info(message,
-		logger.String("type", "success"),
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-	)
-
 	return c.Status(http.StatusOK).JSON(APIResponse{
 		Success: true,
 		Message: message,
@@ -46,11 +41,6 @@ func Success(c fiber.Ctx, message string, data any) error {
 
 // SuccessWithMeta sends a successful response with metadata
 func SuccessWithMeta(c fiber.Ctx, message string, data any, meta any) error {
-	apiLogger.Info(message,
-		logger.String("type", "success"),
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-	)
-
 	return c.Status(http.StatusOK).JSON(APIResponse{
 		Success: true,
 		Message: message,
@@ -61,38 +51,11 @@ func SuccessWithMeta(c fiber.Ctx, message string, data any, meta any) error {
 
 // Created sends a created response
 func Created(c fiber.Ctx, message string, data any) error {
-	apiLogger.Info(message,
-		logger.String("type", "created"),
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-	)
-
 	return c.Status(http.StatusCreated).JSON(APIResponse{
 		Success: true,
 		Message: message,
 		Data:    data,
 	})
-}
-
-// HandleBindError handles errors from c.Bind().Body(). If the error is validation
-// errors from the StructValidator, returns 400 with Message "Validation failed" and
-// Data set to the list of field errors. Otherwise returns BadRequest.
-func HandleBindError(c fiber.Ctx, err error) error {
-	if err == nil {
-		return nil
-	}
-	if validationErrors, ok := err.(validator.ValidationErrors); ok {
-		apiLogger.Warn("Validation failed",
-			logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-			logger.Int("error_count", len(validationErrors.Errors)),
-		)
-		return c.Status(http.StatusBadRequest).JSON(APIResponse{
-			Success: false,
-			Message: "Validation failed",
-			Error:   validationErrors.Error(),
-			Data:    validationErrors.Errors,
-		})
-	}
-	return BadRequest(c, "Invalid request format", err)
 }
 
 // BadRequest sends a bad request error response
@@ -102,9 +65,9 @@ func BadRequest(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	apiLogger.Warn(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("error", errorMsg),
+	log.Warn("bad request",
+		"message", message,
+		"error", errorMsg,
 	)
 
 	return c.Status(http.StatusBadRequest).JSON(APIResponse{
@@ -116,9 +79,8 @@ func BadRequest(c fiber.Ctx, message string, err error) error {
 
 // Unauthorized sends an unauthorized error response
 func Unauthorized(c fiber.Ctx, message string) error {
-	apiLogger.Warn(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("type", "unauthorized"),
+	log.Warn("unauthorized",
+		"message", message,
 	)
 
 	return c.Status(http.StatusUnauthorized).JSON(APIResponse{
@@ -130,15 +92,27 @@ func Unauthorized(c fiber.Ctx, message string) error {
 
 // Forbidden sends a forbidden error response
 func Forbidden(c fiber.Ctx, message string) error {
-	apiLogger.Warn(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("type", "forbidden"),
+	log.Warn("forbidden",
+		"message", message,
 	)
 
 	return c.Status(http.StatusForbidden).JSON(APIResponse{
 		Success: false,
 		Message: message,
 		Error:   "Access forbidden",
+	})
+}
+
+// TooManyRequests sends a 429 rate-limit response.
+func TooManyRequests(c fiber.Ctx, message string) error {
+	log.Warn("too many requests",
+		"message", message,
+	)
+
+	return c.Status(http.StatusTooManyRequests).JSON(APIResponse{
+		Success: false,
+		Message: message,
+		Error:   "Rate limit exceeded",
 	})
 }
 
@@ -149,9 +123,9 @@ func NotFound(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	apiLogger.Warn(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("error", errorMsg),
+	log.Warn("not found",
+		"message", message,
+		"error", errorMsg,
 	)
 
 	return c.Status(http.StatusNotFound).JSON(APIResponse{
@@ -161,22 +135,19 @@ func NotFound(c fiber.Ctx, message string, err error) error {
 	})
 }
 
-// InternalServerError sends an internal server error response
+// InternalServerError sends an internal server error response.
+// The raw error is logged server-side only; the client receives a generic message
+// to avoid leaking internal details (DSN, stack traces, etc.).
 func InternalServerError(c fiber.Ctx, message string, err error) error {
-	errorMsg := ""
-	if err != nil {
-		errorMsg = err.Error()
-	}
-
-	apiLogger.Error(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("error", errorMsg),
+	log.Error("internal server error",
+		"message", message,
+		"error", err,
 	)
 
 	return c.Status(http.StatusInternalServerError).JSON(APIResponse{
 		Success: false,
 		Message: message,
-		Error:   errorMsg,
+		// Do NOT include err.Error() in the response — avoids leaking internal details.
 	})
 }
 
@@ -187,9 +158,9 @@ func ValidationError(c fiber.Ctx, message string, err error) error {
 		errorMsg = err.Error()
 	}
 
-	apiLogger.Warn(message,
-		logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-		logger.String("error", errorMsg),
+	log.Warn("validation error",
+		"message", message,
+		"error", errorMsg,
 	)
 
 	return c.Status(http.StatusUnprocessableEntity).JSON(APIResponse{
@@ -199,15 +170,51 @@ func ValidationError(c fiber.Ctx, message string, err error) error {
 	})
 }
 
-// CalculatePaginationMeta calculates pagination metadata
+// FromValidateError maps validation errors to a unified response:
+// structured field errors use 422 with Errors populated; otherwise ValidationError fallback.
+func FromValidateError(c fiber.Ctx, err error) error {
+	var errs validator.ValidationErrors
+	if errors.As(err, &errs) {
+		log.Warn("validation error",
+			"error", errs.Error(),
+		)
+		return c.Status(http.StatusUnprocessableEntity).JSON(APIResponse{
+			Success: false,
+			Message: "Validation failed",
+			Error:   errs.Error(),
+			Errors:  errs.Errors,
+		})
+	}
+	return ValidationError(c, "Validation failed", err)
+}
+
+// Conflict sends a 409 Conflict response (e.g. duplicate resource).
+func Conflict(c fiber.Ctx, message string, conflictError string) error {
+	log.Warn("conflict",
+		"message", message,
+	)
+	return c.Status(http.StatusConflict).JSON(APIResponse{
+		Success: false,
+		Message: message,
+		Error:   conflictError,
+	})
+}
+
+// CalculatePaginationMeta calculates pagination metadata.
+// Guards against division-by-zero when limit is 0.
 func CalculatePaginationMeta(totalItems int64, offset, limit int) PaginationMeta {
-	totalPages := int(totalItems) / limit
-	if int(totalItems)%limit > 0 {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	total := int(totalItems)
+	totalPages := total / limit
+	if total%limit > 0 {
 		totalPages++
 	}
 
 	return PaginationMeta{
-		TotalItems: int(totalItems),
+		TotalItems: total,
 		Offset:     offset,
 		Limit:      limit,
 		TotalPages: totalPages,

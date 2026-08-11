@@ -5,29 +5,23 @@ import (
 	"errors"
 	"fmt"
 
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
-	"fiberbackend/pkg/utils"
 
 	"gorm.io/gorm"
 )
 
-// Errors that can be returned by the repository (deprecated: use pkg/utils)
-var (
-	ErrUserNotFound = utils.ErrUserNotFound
-	ErrUserExists   = utils.ErrUserAlreadyExists
-)
-
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
-	GetByID(ctx context.Context, id string) (*model.User, error)
-	GetUsers(ctx context.Context, offset int, limit int) ([]*model.User, int64, error)
+	GetByID(ctx context.Context, id string, deletedOnly bool) (*model.User, error)
+	GetUsers(ctx context.Context, offset int, limit int, deletedFilter dto.UserDeletedFilter) ([]*model.User, int64, error)
 	GetUsersByEmail(ctx context.Context, email string) ([]*model.User, error)
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
-	GetByUsernameWithProfile(ctx context.Context, username string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) error
-	UpdatePartial(ctx context.Context, id string, updates map[string]interface{}) error
 	SoftDeleteByID(ctx context.Context, id string) error
+	RestoreByID(ctx context.Context, id string) error
 	Exists(ctx context.Context, email string) (bool, error)
 	CheckUserByUsername(ctx context.Context, username string) error
 }
@@ -51,7 +45,7 @@ func (r *userRepository) CheckUserByUsername(ctx context.Context, username strin
 		return err
 	}
 	if exists {
-		return ErrUserExists
+		return apperrors.ErrUserExists
 	}
 	return nil
 }
@@ -62,7 +56,7 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 		return fmt.Errorf("failed to check user existence: %w", err)
 	}
 	if exists {
-		return ErrUserExists
+		return apperrors.ErrUserExists
 	}
 
 	result := r.db.WithContext(ctx).Create(user)
@@ -71,7 +65,7 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 
 func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 	result := r.db.WithContext(ctx).Model(user).
-		Select("*").
+		Select("Email", "FirstName", "LastName", "Username", "IsSuperAdmin", "Password", "LastLoggedAt").
 		Where("id = ?", user.ID).
 		Updates(user)
 
@@ -79,58 +73,56 @@ func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 		return fmt.Errorf("failed to update user: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrUserNotFound
+		return apperrors.ErrUserNotFound
 	}
 	return nil
 }
 
-// UpdatePartial updates specific fields of a user using a map
-func (r *userRepository) UpdatePartial(ctx context.Context, id string, updates map[string]interface{}) error {
-	result := r.db.WithContext(ctx).Model(&model.User{}).
-		Where("id = ?", id).
-		Updates(updates)
-
-	if result.Error != nil {
-		return fmt.Errorf("failed to update user: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return ErrUserNotFound
-	}
-	return nil
-}
-
-func (r *userRepository) GetByID(ctx context.Context, id string) (*model.User, error) {
+func (r *userRepository) GetByID(ctx context.Context, id string, deletedOnly bool) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
+	query := r.db.WithContext(ctx).Preload("Profile").Where("id = ?", id)
+	if deletedOnly {
+		query = query.Unscoped().Where("deleted_at IS NOT NULL")
+	}
+	err := query.First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUserNotFound
+			return nil, apperrors.ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 	return &user, nil
 }
 
-func (r *userRepository) GetUsers(ctx context.Context, offset, limit int) ([]*model.User, int64, error) {
+func (r *userRepository) GetUsers(ctx context.Context, offset, limit int, deletedFilter dto.UserDeletedFilter) ([]*model.User, int64, error) {
 	var users []*model.User
 	var totalCount int64
 
-	// Validate parameters
 	if offset < 0 {
-		return nil, 0, fmt.Errorf("offset cannot be negative")
+		return nil, 0, errors.New("offset cannot be negative")
 	}
-	if limit <= 0 || limit > 100 { // cap at 100 to prevent excessive resource usage
-		return nil, 0, fmt.Errorf("limit must be between 1 and 100")
+	if limit <= 0 || limit > 100 {
+		return nil, 0, errors.New("limit must be between 1 and 100")
 	}
 
-	// Count total records
-	err := r.db.WithContext(ctx).Model((*model.User)(nil)).Count(&totalCount).Error
-	if err != nil {
+	query := r.db.WithContext(ctx).Model((*model.User)(nil))
+	switch deletedFilter {
+	case dto.UserDeletedFilterOnly:
+		query = query.Unscoped().Where("deleted_at IS NOT NULL")
+	case dto.UserDeletedFilterAll:
+		query = query.Unscoped()
+	}
+
+	if err := query.Count(&totalCount).Error; err != nil {
 		return nil, 0, fmt.Errorf("failed to count users: %w", err)
 	}
 
-	// Get paginated records
-	err = r.db.WithContext(ctx).Offset(offset).Limit(limit).Find(&users).Error
+	findQuery := query.Offset(offset).Limit(limit)
+	if deletedFilter == dto.UserDeletedFilterOnly {
+		findQuery = findQuery.Order("deleted_at DESC")
+	}
+
+	err := findQuery.Find(&users).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get users: %w", err)
 	}
@@ -148,28 +140,77 @@ func (r *userRepository) GetUsersByEmail(ctx context.Context, email string) ([]*
 }
 
 func (r *userRepository) SoftDeleteByID(ctx context.Context, id string) error {
-	// Assumes model.User has a gorm.DeletedAt field for soft delete
 	result := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.User{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to soft delete user: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrUserNotFound
+		return apperrors.ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *userRepository) RestoreByID(ctx context.Context, id string) error {
+	var user model.User
+	err := r.db.WithContext(ctx).Unscoped().
+		Where("id = ? AND deleted_at IS NOT NULL", id).
+		First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperrors.ErrUserNotFound
+		}
+		return fmt.Errorf("failed to get deleted user: %w", err)
+	}
+
+	var emailTaken bool
+	err = r.db.WithContext(ctx).Model(&model.User{}).
+		Select("1").
+		Where("email = ? AND id != ?", user.Email, id).
+		Limit(1).
+		Scan(&emailTaken).Error
+	if err != nil {
+		return fmt.Errorf("failed to check email conflict: %w", err)
+	}
+	if emailTaken {
+		return apperrors.ErrUserExists
+	}
+
+	if user.Username != nil && *user.Username != "" {
+		var usernameTaken bool
+		err = r.db.WithContext(ctx).Model(&model.User{}).
+			Select("1").
+			Where("username = ? AND id != ?", *user.Username, id).
+			Limit(1).
+			Scan(&usernameTaken).Error
+		if err != nil {
+			return fmt.Errorf("failed to check username conflict: %w", err)
+		}
+		if usernameTaken {
+			return apperrors.ErrUserExists
+		}
+	}
+
+	result := r.db.WithContext(ctx).Unscoped().Model(&user).Update("deleted_at", nil)
+	if result.Error != nil {
+		return fmt.Errorf("failed to restore user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return apperrors.ErrUserNotFound
 	}
 	return nil
 }
 
 func (r *userRepository) Exists(ctx context.Context, email string) (bool, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Model((*model.User)(nil)).Where("email = ?", email).Count(&count).Error
+	var exists bool
+	err := r.db.WithContext(ctx).Model((*model.User)(nil)).
+		Select("1").
+		Where("email = ?", email).
+		Limit(1).
+		Scan(&exists).Error
 	if err != nil {
-		// If the error is record not found, it means no user with that email exists.
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
 		return false, fmt.Errorf("failed to check user existence: %w", err)
 	}
-	return count > 0, nil
+	return exists, nil
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
@@ -177,7 +218,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.U
 	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUserNotFound
+			return nil, apperrors.ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
@@ -186,22 +227,10 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.U
 
 func (r *userRepository) GetByUsername(ctx context.Context, username string) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("username = ?", username).First(&user).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUserNotFound
-		}
-		return nil, fmt.Errorf("failed to get user by username: %w", err)
-	}
-	return &user, nil
-}
-
-func (r *userRepository) GetByUsernameWithProfile(ctx context.Context, username string) (*model.User, error) {
-	var user model.User
 	err := r.db.WithContext(ctx).Preload("Profile").Where("username = ?", username).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrUserNotFound
+			return nil, apperrors.ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by username: %w", err)
 	}

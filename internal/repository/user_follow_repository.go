@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
@@ -16,7 +16,7 @@ type UserFollowRepository interface {
 	IsFollowing(ctx context.Context, followerID, followingID string) (bool, error)
 	GetFollowers(ctx context.Context, userID string, limit, offset int) ([]*model.User, int64, error)
 	GetFollowing(ctx context.Context, userID string, limit, offset int) ([]*model.User, int64, error)
-	GetFollowStats(ctx context.Context, userID string) (*model.UserFollowStats, error)
+	GetFollowStats(ctx context.Context, userID string) (*dto.UserFollowStats, error)
 	UpdateFollowCounts(ctx context.Context, userID string) error
 	GetMutualFollows(ctx context.Context, userID1, userID2 string) ([]*model.User, error)
 }
@@ -30,81 +30,43 @@ func NewUserFollowRepository(db *gorm.DB) UserFollowRepository {
 }
 
 func (r *userFollowRepository) Follow(ctx context.Context, followerID, followingID string) error {
-	// Check if already following
 	isFollowing, err := r.IsFollowing(ctx, followerID, followingID)
 	if err != nil {
-		return fmt.Errorf("failed to check if already following: %w", err)
+		return err
 	}
 	if isFollowing {
-		return errors.New("already following this user")
+		return apperrors.ErrAlreadyFollowing
 	}
 
-	// Prevent self-following
 	if followerID == followingID {
-		return errors.New("cannot follow yourself")
+		return apperrors.ErrCannotFollowSelf
 	}
 
-	// Create follow relationship
 	follow := &model.UserFollow{
 		FollowerID:  followerID,
 		FollowingID: followingID,
 	}
 
-	// Use transaction to ensure consistency
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Create follow record
-		if err := tx.Create(follow).Error; err != nil {
-			return fmt.Errorf("failed to create follow record: %w", err)
-		}
-
-		// Update follower's following count
-		if err := tx.Model(&model.User{}).Where("id = ?", followerID).
-			Update("following_count", gorm.Expr("following_count + 1")).Error; err != nil {
-			return fmt.Errorf("failed to update following count: %w", err)
-		}
-
-		// Update following user's followers count
-		if err := tx.Model(&model.User{}).Where("id = ?", followingID).
-			Update("followers_count", gorm.Expr("followers_count + 1")).Error; err != nil {
-			return fmt.Errorf("failed to update followers count: %w", err)
-		}
-
-		return nil
-	})
+	// followers_count / following_count are maintained automatically by the
+	// database triggers (trigger_update_follow_counts_insert/delete on
+	// user_follows), so only the follow row is created here. The previous
+	// app-level gorm.Expr increments ran *in addition* to the triggers and
+	// double-counted every follow.
+	return r.db.WithContext(ctx).Create(follow).Error
 }
 
 func (r *userFollowRepository) Unfollow(ctx context.Context, followerID, followingID string) error {
-	// Check if actually following
 	isFollowing, err := r.IsFollowing(ctx, followerID, followingID)
 	if err != nil {
-		return fmt.Errorf("failed to check if following: %w", err)
+		return err
 	}
 	if !isFollowing {
-		return errors.New("not following this user")
+		return apperrors.ErrNotFollowing
 	}
 
-	// Use transaction to ensure consistency
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete follow record
-		if err := tx.Where("follower_id = ? AND following_id = ?", followerID, followingID).
-			Delete(&model.UserFollow{}).Error; err != nil {
-			return fmt.Errorf("failed to delete follow record: %w", err)
-		}
-
-		// Update follower's following count
-		if err := tx.Model(&model.User{}).Where("id = ?", followerID).
-			Update("following_count", gorm.Expr("following_count - 1")).Error; err != nil {
-			return fmt.Errorf("failed to update following count: %w", err)
-		}
-
-		// Update following user's followers count
-		if err := tx.Model(&model.User{}).Where("id = ?", followingID).
-			Update("followers_count", gorm.Expr("followers_count - 1")).Error; err != nil {
-			return fmt.Errorf("failed to update followers count: %w", err)
-		}
-
-		return nil
-	})
+	// Count columns are maintained by DB triggers; only the follow row is deleted.
+	return r.db.WithContext(ctx).Where("follower_id = ? AND following_id = ?", followerID, followingID).
+		Delete(&model.UserFollow{}).Error
 }
 
 func (r *userFollowRepository) IsFollowing(ctx context.Context, followerID, followingID string) (bool, error) {
@@ -112,23 +74,18 @@ func (r *userFollowRepository) IsFollowing(ctx context.Context, followerID, foll
 	err := r.db.WithContext(ctx).Model(&model.UserFollow{}).
 		Where("follower_id = ? AND following_id = ?", followerID, followingID).
 		Count(&count).Error
-	if err != nil {
-		return false, fmt.Errorf("failed to check if following: %w", err)
-	}
-	return count > 0, nil
+	return count > 0, err
 }
 
 func (r *userFollowRepository) GetFollowers(ctx context.Context, userID string, limit, offset int) ([]*model.User, int64, error) {
 	var users []*model.User
 	var total int64
 
-	// Count total followers
 	if err := r.db.WithContext(ctx).Model(&model.UserFollow{}).
 		Where("following_id = ?", userID).Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to count followers: %w", err)
+		return nil, 0, err
 	}
 
-	// Get followers with pagination
 	err := r.db.WithContext(ctx).
 		Table("users").
 		Select("users.*").
@@ -138,24 +95,19 @@ func (r *userFollowRepository) GetFollowers(ctx context.Context, userID string, 
 		Limit(limit).
 		Offset(offset).
 		Find(&users).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get followers: %w", err)
-	}
 
-	return users, total, nil
+	return users, total, err
 }
 
 func (r *userFollowRepository) GetFollowing(ctx context.Context, userID string, limit, offset int) ([]*model.User, int64, error) {
 	var users []*model.User
 	var total int64
 
-	// Count total following
 	if err := r.db.WithContext(ctx).Model(&model.UserFollow{}).
 		Where("follower_id = ?", userID).Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to count following: %w", err)
+		return nil, 0, err
 	}
 
-	// Get following with pagination
 	err := r.db.WithContext(ctx).
 		Table("users").
 		Select("users.*").
@@ -165,26 +117,21 @@ func (r *userFollowRepository) GetFollowing(ctx context.Context, userID string, 
 		Limit(limit).
 		Offset(offset).
 		Find(&users).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get following: %w", err)
-	}
 
-	return users, total, nil
+	return users, total, err
 }
 
-func (r *userFollowRepository) GetFollowStats(ctx context.Context, userID string) (*model.UserFollowStats, error) {
-	stats := &model.UserFollowStats{UserID: userID}
+func (r *userFollowRepository) GetFollowStats(ctx context.Context, userID string) (*dto.UserFollowStats, error) {
+	stats := &dto.UserFollowStats{UserID: userID}
 
-	// Get followers count
 	if err := r.db.WithContext(ctx).Model(&model.UserFollow{}).
 		Where("following_id = ?", userID).Count(&stats.FollowersCount).Error; err != nil {
-		return nil, fmt.Errorf("failed to count followers: %w", err)
+		return nil, err
 	}
 
-	// Get following count
 	if err := r.db.WithContext(ctx).Model(&model.UserFollow{}).
 		Where("follower_id = ?", userID).Count(&stats.FollowingCount).Error; err != nil {
-		return nil, fmt.Errorf("failed to count following: %w", err)
+		return nil, err
 	}
 
 	return stats, nil
@@ -193,23 +140,19 @@ func (r *userFollowRepository) GetFollowStats(ctx context.Context, userID string
 func (r *userFollowRepository) UpdateFollowCounts(ctx context.Context, userID string) error {
 	stats, err := r.GetFollowStats(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get follow stats: %w", err)
+		return err
 	}
 
-	if err := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).
-		Updates(map[string]interface{}{
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).
+		Updates(map[string]any{
 			"followers_count": stats.FollowersCount,
 			"following_count": stats.FollowingCount,
-		}).Error; err != nil {
-		return fmt.Errorf("failed to update follow counts: %w", err)
-	}
-	return nil
+		}).Error
 }
 
 func (r *userFollowRepository) GetMutualFollows(ctx context.Context, userID1, userID2 string) ([]*model.User, error) {
 	var users []*model.User
 
-	// Find users that both userID1 and userID2 follow
 	err := r.db.WithContext(ctx).
 		Table("users").
 		Select("users.*").
@@ -217,9 +160,6 @@ func (r *userFollowRepository) GetMutualFollows(ctx context.Context, userID1, us
 		Joins("JOIN user_follows uf2 ON users.id = uf2.following_id").
 		Where("uf1.follower_id = ? AND uf2.follower_id = ?", userID1, userID2).
 		Find(&users).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mutual follows: %w", err)
-	}
 
-	return users, nil
+	return users, err
 }

@@ -1,15 +1,17 @@
 # AGENTS.md - Agent Guidelines for FiberBackend
 
-REST API built with Go 1.25+, Fiber v3, PostgreSQL, and GORM. Clean architecture with handler/service/repository layers using Uber's dig (`go.uber.org/dig`) for dependency injection.
+REST API built with Go 1.26, **Fiber v3**, PostgreSQL, and GORM. Clean architecture with handler/service/repository layers using **manual dependency injection** (`internal/di/container.go`). Synced feature-for-feature with `echobackend` (Echo v5 twin); only the HTTP layer differs (Fiber vs Echo).
 
 ## Build/Lint/Test Commands
 
 ```bash
-# Build
-CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bin/main cmd/main.go
+# Local dev services (Postgres 18 + Valkey + MinIO via docker-compose.yml)
+docker compose up -d --wait # Start services (or: make up). Creates the `custom` schema automatically.
+docker compose down         # Stop (or: make down; make down-clean also wipes data)
+make help                   # All shortcuts: up, dev, test, lint, check, migrate-*, ...
 
 # Run
-air                              # Hot reload development
+air                              # Hot reload development (reads .env automatically)
 go run cmd/main.go              # Direct run
 
 # Lint
@@ -18,16 +20,83 @@ gofmt -l .                      # Check formatting
 go vet ./...                    # Vet all packages
 
 # Test
-go test ./...                   # Run all tests
-go test ./pkg/utils/...         # Run tests in specific package
-go test -run TestIsValidEmail   # Run single test by name
-go test -v ./...                # Verbose output
+go test ./...                   # Run all tests (service + pkg layers only; no DB integration tests)
+go test -race ./...             # Race checker
 go test -cover ./...            # With coverage
-go test -short ./...            # Short mode (skip long-running tests)
+
+# Migrations (requires .env with GOOSE_* vars)
+goose up                        # Apply pending
+goose down                      # Rollback one
+goose status                    # Check current
+goose create <name> sql         # New migration file (always sql, never go)
 
 # Dependencies
 go mod download && go mod tidy && go mod verify
 ```
+
+## Architecture
+
+- **Framework**: Fiber **v3** (not v2). API differences: use `c fiber.Ctx`, `c.Bind().Body(&req)`, `c.Params("id")`, `c.Query("x")`, middleware signature `func(c fiber.Ctx) error`.
+- **Entry point**: `cmd/main.go` — loads config → creates DI container → registers routes → starts server with graceful shutdown (10s).
+- **DI**: Manual wiring in `internal/di/container.go`. All handler/service/repo/platform instances created there. **No reflection-based DI (e.g. dig).**
+- **Layering**: `handler` → `service` → `repository` → `model`.
+- **`internal/platform/`**: App-owned infrastructure adapters (`cache`, `database`, `email`, `queue`, `storage`). All fail-open when their optional config is empty.
+- **`internal/dto/`**: Request/response structs + converters. `internal/apperror/` for shared app error sentinels.
+- **`pkg/`**: Reusable helper packages (`applog`, `market`, `response`, `validator`).
+- **API routes**: All under `/api/*`, defined in `internal/routes/*Routes.go`. Auth-protected routes use `r.authMiddleware.Auth()`; admin routes chain `r.authMiddleware.AuthAdmin()`.
+- **Auth context**: Auth middleware stores validated JWT claims under `c.Locals("user", claims)`. Handlers read them via `handler.GetUserIDFromClaims(c)`.
+- **Health**: `GET /health` — pings DB (200/503). Used by Docker HEALTHCHECK and load balancers.
+- **Pagination**: Use `handler.ParsePaginationParams(c, defaultLimit)` — returns `(limit, offset)`, max cap 100. Build meta with `response.CalculatePaginationMeta(total, offset, limit)` and pass via `response.SuccessWithMeta`.
+- **Streaming (chat)**: SSE via `c.RequestCtx().SetBodyStreamWriter(...)` — see `internal/handler/chat_conversation_handler.go`.
+
+## Config & Env
+
+- Config loaded via `config.Load()` (`config/config.go`) — reads `.env` (godotenv) then environment variables. Grouped into sections: `App`, `HTTP`, `Auth`, `Database`, `S3`, `Cache`, `Queue`, `OpenRouter`, `GitHub`, `Frontend`, `Email`, `MarketData`.
+- **Required**: `DATABASE_URL`, `JWT_SECRET`. App panics if missing (JWT must be ≥ 32 chars).
+- Many keys accept **fallback aliases** (legacy names such as `MAX_OPEN_CONNS`, `RATE_LIMITER_MAX`, `DEBUG`). First-set key wins.
+- `GOOSE_TABLE=custom.goose_migrations` — non-default goose table location; create the `custom` schema before the first `goose up`.
+- Valkey/Redis caching, SMTP email, Asynq queue, S3/MinIO, GitHub OAuth, OpenRouter and market-data are **optional** — leave their keys empty to disable (app runs fail-open).
+
+## Testing
+
+- Tests exist in `internal/service/`, `internal/dto/`, `config/`, `pkg/`. No repository or DB integration tests.
+- **No external test dependencies** — service tests use hand-written mocks (`internal/service/mocks_test.go`).
+- Running `go test ./...` does not require PostgreSQL.
+- Test file pattern: `*_test.go` in the same package (white-box).
+
+## Response Format
+
+All handlers use `pkg/response` for consistent JSON:
+
+```go
+response.Success(c, "message", data)        // 200
+response.Created(c, "message", data)         // 201
+response.ValidationError(c, "msg", err)       // 422
+response.BadRequest(c, "msg", err)            // 400
+response.NotFound(c, "msg", err)              // 404
+response.Unauthorized(c, "msg")              // 401
+response.Forbidden(c, "msg")                 // 403
+response.Conflict(c, "msg", conflictErr)      // 409
+response.InternalServerError(c, "msg", err)  // 500 — err logged server-side only, never sent to client
+response.FromValidateError(c, err)            // 422 with structured field errors
+response.TooManyRequests(c, "msg")           // 429 (rate limit)
+```
+
+Validation failures map to **422** with a structured `errors` array (`response.FromValidateError`). `response.Conflict` takes a string reason, not an `error`.
+
+## CI
+
+`.github/workflows/main.yml` runs on PRs and pushes to `main`:
+1. **test** — `go vet ./...`, `go test ./...`, `golangci-lint` (v2.12.2)
+2. **docker** (push to `main` only, after test) — build & push `cecep31/fiberbackend:latest`, `:sha-<12-char>`, and `:sha-<full>` (awaiting)
+3. **deploy** (after docker) — Fly.io `flyctl deploy --remote-only`
+
+## Migrations
+
+- Goose with **raw SQL** files in `migrations/`. Numbered `001_init_schema.sql` through `012_add_corporate_actions.sql`.
+- Uses PostgreSQL features: triggers for count fields, UUID v7 defaults, `ON DELETE CASCADE`, soft deletes via `deleted_at`.
+- **New migrations**: `goose create <name> sql` (always `sql`, never `go`).
+- **First-time setup**: The local Postgres from `docker compose up` auto-creates the `custom` schema (`scripts/init-db.sql`). For an external Postgres, run `psql "$DATABASE_URL" -c 'CREATE SCHEMA IF NOT EXISTS custom;'` once before the first `goose up`.
 
 ## Code Style Guidelines
 
@@ -52,142 +121,42 @@ import (
 - Max line length: 140 characters (see `.golangci.yml` `lll` setting)
 - Tabs for indentation
 - No trailing whitespace
-- Enable `goimports` for import organization (local prefix: `fiberbackend`)
-
-### Complexity Limits
-
-- Function max lines: 100 (`funlen` setting)
-- Function max statements: 50
-- Cyclomatic complexity max: 15 (`gocyclo`)
 
 ### Naming Conventions
 
 - **Packages**: lowercase, single word (e.g., `handler`, `service`)
 - **Exported**: PascalCase (e.g., `UserService`, `GetByID`)
 - **Unexported**: camelCase (e.g., `userRepo`)
-- **Interfaces**: Noun ending in "-er" (e.g., `UserService`)
 - **Constants**: PascalCase for exported
 - **Test files**: `*_test.go`, functions: `TestXxx`
 - **JSON/DB fields**: snake_case (e.g., `first_name`, `created_at`)
 
-### Fiber v3 API
-
-This project uses Fiber v3. Note API differences from v2:
-- Use `c fiber.Ctx` (not `fiber.Ctx`)
-- Use `c.Bind().Body(&req)` (not `c.BodyParser(&req)`)
-- Middleware signature: `func(c fiber.Ctx) error` (not `fiber.Handler`)
-
-### Types and Structs
-
-Define interfaces in consumer package. Order fields: ID, timestamps, other fields, relationships. Use pointers for nullable DB fields. Document exported types.
-
-```go
-// User represents the user model in the database
-type User struct {
-	ID        string         `json:"id" gorm:"type:uuid;primaryKey"`
-	CreatedAt *time.Time     `json:"created_at"`
-	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
-	Profile   *Profile       `gorm:"foreignKey:UserID"`
-}
-```
-
 ### Error Handling
 
-Use `AppError` from `pkg/utils/errors.go`. Wrap with `fmt.Errorf("...: %w", err)`. Return early on errors. Check sentinel errors with `errors.Is()`. HTTP handlers use `pkg/response/` helpers.
-
-Define sentinel errors in service packages using `var` declarations:
-
-```go
-var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserNotFound       = errors.New("user not found")
-)
-```
-
-### Response Patterns
-
-Use standardized helpers in handlers:
-- `response.Success(c, message, data)` - 200 OK
-- `response.Created(c, message, data)` - 201 Created
-- `response.BadRequest(c, message, err)` - 400
-- `response.Unauthorized(c, message)` - 401
-- `response.Forbidden(c, message)` - 403
-- `response.NotFound(c, message, err)` - 404
-- `response.InternalServerError(c, message, err)` - 500
-- `response.HandleBindError(c, err)` - Validation errors
-
-### Architecture
-
-**Layer order**: Handler → Service → Repository → Model
-
-- **Handler**: HTTP handling, input validation, responses
-- **Service**: Business logic, orchestration, transactions
-- **Repository**: Data access, GORM queries
-- **Model**: Structs, DB tags, conversion methods (`ToResponse`, `ToSummary`)
-
-**Dependency Injection**: Use Uber's `dig` container (`internal/di/container.go`). Register: Config → Database → Repositories → Services → Handlers → Routes.
-
-### Middleware
-
-Middleware is defined in `internal/middleware/`. Use ` fiber.Ctx` methods for request context. Auth middleware validates JWT tokens and sets user context. Apply middleware in routes using `app.Use()` or route-level with `config fiber.Config` in routes.
-
-### Database Migrations
-
-SQL migrations in `migrations/` folder. Apply manually via psql:
-```bash
-psql -d your_database -f migrations/001_*.sql
-```
-
-### Comments
-
-All exported identifiers need comments starting with the identifier name. Use complete sentences. Document the "why", not just "what".
-
-### Testing
-
-Table-driven tests with `testify/assert` or `testify/require`. Mock at repository level. Name tests: `Test<FunctionName>` or `Test<Struct>_<Method>`.
-
-```go
-func TestIsValidEmail(t *testing.T) {
-	tests := []struct {
-		name  string
-		email string
-		want  bool
-	}{
-		{name: "Valid email", email: "test@example.com", want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsValidEmail(tt.email); got != tt.want {
-				t.Errorf("IsValidEmail() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-```
+Use sentinel errors from `internal/apperror` (or package-local `var` declarations). Wrap with `fmt.Errorf("...: %w", err)`. Check sentinel errors with `errors.Is()`. HTTP handlers map apperror sentinels to the right `pkg/response` helper — never leak `err.Error()` on 500.
 
 ### Validation
 
-Use `go-playground/validator` tags. Define request structs in handlers.
+Use `go-playground/validator` tags. Request structs live in `internal/dto/`. Validate explicitly after binding:
 
 ```go
-type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6"`
+var req dto.CreatePostRequest
+if err := c.Bind().Body(&req); err != nil {
+	return response.BadRequest(c, "Failed to create post", err)
+}
+if err := bindValidate(c, &req); err != nil {
+	return err
 }
 ```
-
-### Configuration
-
-Use `config/config.go`. Environment variables with defaults. Required validation in `validate()` method. Never commit secrets; `.env` is in `.gitignore`.
 
 ## Key Files
 
 - `cmd/main.go` - Entry point
-- `config/config.go` - Configuration
-- `internal/di/container.go` - DI container
+- `config/config.go` - Configuration (grouped, alias-aware)
+- `internal/di/container.go` - Manual DI container
 - `internal/middleware/setup.go` - Middleware setup
 - `internal/routes/routes.go` - Route definitions
 - `pkg/response/response.go` - HTTP response helpers
-- `pkg/utils/errors.go` - Application error types
+- `internal/apperror/errors.go` - Application error sentinels
 - `.golangci.yml` - Linter config
 - `.air.toml` - Hot reload config

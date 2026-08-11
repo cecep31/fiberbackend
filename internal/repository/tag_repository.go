@@ -3,22 +3,22 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt" // For error wrapping
+	"fmt"
 
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 
-	"gorm.io/gorm" // For gorm.DB and gorm.ErrRecordNotFound
-)
-
-var (
-	ErrTagNotFound = errors.New("tag not found")
+	"gorm.io/gorm"
 )
 
 type TagRepository interface {
 	Create(ctx context.Context, tag *model.Tag) error
-	FindAll(ctx context.Context, offset, limit int) ([]model.Tag, int64, error)
+	FindAll(ctx context.Context) ([]model.Tag, error)
 	FindByID(ctx context.Context, id uint) (*model.Tag, error)
 	FindByName(ctx context.Context, name string) (*model.Tag, error)
+	GetTrendingTags(ctx context.Context, limit int) ([]*dto.TrendingTagResponse, error)
+	GetTagsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapTag, error)
 	Update(ctx context.Context, tag *model.Tag) error
 	Delete(ctx context.Context, id uint) error
 }
@@ -33,9 +33,8 @@ func NewTagRepository(db *gorm.DB) TagRepository {
 
 func (r *tagRepository) Create(ctx context.Context, tag *model.Tag) error {
 	if tag == nil {
-		return errors.New("tag cannot be nil")
+		return apperrors.ErrTagNameRequired
 	}
-	// GORM's Create will also update CreatedAt/UpdatedAt if they exist in model.Tag
 	result := r.db.WithContext(ctx).Create(tag)
 	if result.Error != nil {
 		return fmt.Errorf("failed to create tag: %w", result.Error)
@@ -43,38 +42,24 @@ func (r *tagRepository) Create(ctx context.Context, tag *model.Tag) error {
 	return nil
 }
 
-func (r *tagRepository) FindAll(ctx context.Context, offset, limit int) ([]model.Tag, int64, error) {
+func (r *tagRepository) FindAll(ctx context.Context) ([]model.Tag, error) {
 	var tags []model.Tag
-	var totalCount int64
-
-	if offset < 0 {
-		return nil, 0, errors.New("offset cannot be negative")
-	}
-	if limit <= 0 || limit > 100 {
-		return nil, 0, errors.New("limit must be between 1 and 100")
-	}
-
-	err := r.db.WithContext(ctx).Model((*model.Tag)(nil)).Count(&totalCount).Error
+	err := r.db.WithContext(ctx).Find(&tags).Error
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count tags: %w", err)
+		return nil, fmt.Errorf("failed to find all tags: %w", err)
 	}
-
-	err = r.db.WithContext(ctx).Offset(offset).Limit(limit).Find(&tags).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to find all tags: %w", err)
-	}
-	return tags, totalCount, nil
+	return tags, nil
 }
 
 func (r *tagRepository) FindByID(ctx context.Context, id uint) (*model.Tag, error) {
 	if id == 0 {
-		return nil, errors.New("invalid tag ID")
+		return nil, apperrors.ErrInvalidTagID
 	}
 	var tag model.Tag
 	err := r.db.WithContext(ctx).First(&tag, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrTagNotFound
+			return nil, apperrors.ErrTagNotFound
 		}
 		return nil, fmt.Errorf("failed to find tag by ID %d: %w", id, err)
 	}
@@ -83,63 +68,89 @@ func (r *tagRepository) FindByID(ctx context.Context, id uint) (*model.Tag, erro
 
 func (r *tagRepository) FindByName(ctx context.Context, name string) (*model.Tag, error) {
 	if name == "" {
-		return nil, errors.New("tag name cannot be empty")
+		return nil, apperrors.ErrTagNameEmpty
 	}
 	var tag model.Tag
 	err := r.db.WithContext(ctx).Where("name = ?", name).First(&tag).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrTagNotFound
+			return nil, apperrors.ErrTagNotFound
 		}
 		return nil, fmt.Errorf("failed to find tag by name %s: %w", name, err)
 	}
 	return &tag, nil
 }
 
-func (r *tagRepository) Update(ctx context.Context, tag *model.Tag) error {
-	if tag == nil {
-		return errors.New("tag cannot be nil")
-	}
-	if tag.ID == 0 { // Check for zero value of primary key
-		return errors.New("invalid tag ID for update")
+func (r *tagRepository) GetTrendingTags(ctx context.Context, limit int) ([]*dto.TrendingTagResponse, error) {
+	var tags []*dto.TrendingTagResponse
+
+	err := r.db.WithContext(ctx).
+		Table("tags").
+		Select("tags.id, tags.name, COALESCE(SUM(posts.view_count), 0) AS total_views, COALESCE(SUM(posts.like_count), 0) AS total_likes, COALESCE(SUM(posts.like_count * 2 + posts.bookmark_count * 2 + posts.view_count), 0) AS trending_score").
+		Joins("INNER JOIN posts_to_tags ON posts_to_tags.tag_id = tags.id").
+		Joins("INNER JOIN posts ON posts.id = posts_to_tags.post_id").
+		Joins("INNER JOIN users ON users.id = posts.created_by AND users.deleted_at IS NULL").
+		Where("posts.published = ? AND posts.deleted_at IS NULL", true).
+		Group("tags.id, tags.name").
+		Order("trending_score DESC, COUNT(posts_to_tags.post_id) DESC, tags.name ASC").
+		Limit(limit).
+		Scan(&tags).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trending tags: %w", err)
 	}
 
-	// GORM's Save updates all fields or creates if record not found (based on PK).
-	// If you only want to update, ensure the record exists or use Updates for specific fields.
-	// For updating based on a full model, Save is common.
-	// It will also update UpdatedAt field if present in model.Tag.
+	return tags, nil
+}
+
+func (r *tagRepository) GetTagsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapTag, error) {
+	var sitemapTags []*dto.SitemapTag
+
+	err := r.db.WithContext(ctx).
+		Table("tags").
+		Select("tags.name, tags.created_at").
+		Joins("INNER JOIN posts_to_tags ON posts_to_tags.tag_id = tags.id").
+		Joins("INNER JOIN posts ON posts.id = posts_to_tags.post_id").
+		Where("posts.published = ?", true).
+		Group("tags.id, tags.name, tags.created_at").
+		Order("tags.name ASC").
+		Limit(limit).
+		Find(&sitemapTags).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tags for sitemap: %w", err)
+	}
+
+	return sitemapTags, nil
+}
+
+func (r *tagRepository) Update(ctx context.Context, tag *model.Tag) error {
+	if tag == nil {
+		return apperrors.ErrTagNameRequired
+	}
+	if tag.ID == 0 {
+		return apperrors.ErrInvalidTagID
+	}
+
 	result := r.db.WithContext(ctx).Save(tag)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update tag: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		// This case might mean the record didn't exist, or no fields were changed
-		// depending on GORM version and specific behavior of Save.
-		// For Save, if PK exists, it updates. If PK doesn't exist, it inserts.
-		// If we want to ensure it's an update only, a prior check or using Updates might be better.
-		// However, if Save is used and RowsAffected is 0 after an update attempt on existing PK,
-		// it could mean no actual data changed.
-		// Let's assume for now that if Save doesn't error, it's fine.
-		// A more robust check for "not found" would be to query first or use `Updates` and check RowsAffected.
-		// For simplicity, if Save doesn't error, we assume success.
-		// If an update must happen, check RowsAffected.
-		return ErrTagNotFound // If we strictly expect an update
+		return apperrors.ErrTagNotFound
 	}
 	return nil
 }
 
 func (r *tagRepository) Delete(ctx context.Context, id uint) error {
 	if id == 0 {
-		return errors.New("invalid tag ID")
+		return apperrors.ErrInvalidTagID
 	}
-	// This will perform a soft delete if model.Tag has gorm.DeletedAt.
-	// Otherwise, it's a hard delete.
 	result := r.db.WithContext(ctx).Delete(&model.Tag{}, id)
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete tag: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrTagNotFound
+		return apperrors.ErrTagNotFound
 	}
 	return nil
 }

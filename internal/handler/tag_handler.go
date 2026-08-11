@@ -1,12 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
 
-	"fiberbackend/internal/model"
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -20,31 +21,55 @@ func NewTagHandler(service service.TagService) *TagHandler {
 }
 
 func (h *TagHandler) CreateTag(c fiber.Ctx) error {
-	tag := new(model.Tag)
-	if err := c.Bind().Body(tag); err != nil {
-		return response.HandleBindError(c, err)
+	var req dto.CreateTagRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request payload", err)
+	}
+	if err := bindValidate(c, &req); err != nil {
+		return err
 	}
 
-	if err := h.service.CreateTag(c.Context(), tag); err != nil {
+	tag, err := h.service.CreateTag(c.Context(), &req)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrTagNameRequired) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
 		return response.InternalServerError(c, "Failed to create tag", err)
 	}
 
-	return response.Created(c, "Tag created successfully", tag)
+	return response.Created(c, "Tag created successfully", dto.TagToResponse(tag))
 }
 
 func (h *TagHandler) GetTags(c fiber.Ctx) error {
-	limit, offset, err := validator.ValidatePaginationWithDefaults(c.Query("limit"), c.Query("offset"))
-	if err != nil {
-		return response.BadRequest(c, "Invalid pagination parameters", err)
-	}
-
-	tags, total, err := h.service.GetTags(c.Context(), offset, limit)
+	tags, err := h.service.GetTags(c.Context())
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get tags", err)
 	}
 
-	meta := response.CalculatePaginationMeta(total, offset, limit)
-	return response.SuccessWithMeta(c, "Successfully retrieved tags", tags, meta)
+	tagResponses := make([]*dto.TagResponse, 0, len(tags))
+	for i := range tags {
+		tagResponses = append(tagResponses, dto.TagToResponse(&tags[i]))
+	}
+
+	return response.Success(c, "Successfully retrieved tags", tagResponses)
+}
+
+func (h *TagHandler) GetTrendingTags(c fiber.Ctx) error {
+	tags, err := h.service.GetTrendingTags(c.Context())
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get trending tags", err)
+	}
+
+	return response.Success(c, "Successfully retrieved trending tags", tags)
+}
+
+func (h *TagHandler) GetTagsForSitemap(c fiber.Ctx) error {
+	tags, err := h.service.GetTagsForSitemap(c.Context(), 1000)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to get tags for sitemap", err)
+	}
+
+	return response.Success(c, "Successfully retrieved tags for sitemap", tags)
 }
 
 func (h *TagHandler) GetTagByID(c fiber.Ctx) error {
@@ -55,10 +80,13 @@ func (h *TagHandler) GetTagByID(c fiber.Ctx) error {
 
 	tag, err := h.service.GetTagByID(c.Context(), uint(id))
 	if err != nil {
-		return response.NotFound(c, "Tag not found", err)
+		if errors.Is(err, apperrors.ErrTagNotFound) || errors.Is(err, apperrors.ErrInvalidTagID) {
+			return response.NotFound(c, "Tag not found", err)
+		}
+		return response.InternalServerError(c, "Failed to get tag", err)
 	}
 
-	return response.Success(c, "Successfully retrieved tag", tag)
+	return response.Success(c, "Successfully retrieved tag", dto.TagToResponse(tag))
 }
 
 func (h *TagHandler) UpdateTag(c fiber.Ctx) error {
@@ -67,17 +95,26 @@ func (h *TagHandler) UpdateTag(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid tag ID", err)
 	}
 
-	tag := new(model.Tag)
-	if err := c.Bind().Body(tag); err != nil {
-		return response.HandleBindError(c, err)
+	var req dto.UpdateTagRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request payload", err)
 	}
-	tag.ID = int(id)
+	if err := bindValidate(c, &req); err != nil {
+		return err
+	}
 
-	if err := h.service.UpdateTag(c.Context(), tag); err != nil {
+	tag, err := h.service.UpdateTag(c.Context(), uint(id), &req)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrTagNameRequired) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
+		if errors.Is(err, apperrors.ErrTagNotFound) {
+			return response.NotFound(c, "Tag not found", err)
+		}
 		return response.InternalServerError(c, "Failed to update tag", err)
 	}
 
-	return response.Success(c, "Tag updated successfully", tag)
+	return response.Success(c, "Tag updated successfully", dto.TagToResponse(tag))
 }
 
 func (h *TagHandler) DeleteTag(c fiber.Ctx) error {
@@ -87,6 +124,9 @@ func (h *TagHandler) DeleteTag(c fiber.Ctx) error {
 	}
 
 	if err := h.service.DeleteTag(c.Context(), uint(id)); err != nil {
+		if errors.Is(err, apperrors.ErrTagNotFound) {
+			return response.NotFound(c, "Tag not found", err)
+		}
 		return response.InternalServerError(c, "Failed to delete tag", err)
 	}
 

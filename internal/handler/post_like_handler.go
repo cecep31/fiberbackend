@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"strconv"
+	"errors"
 
+	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/utils"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -18,22 +18,26 @@ func NewPostLikeHandler(postLikeService service.PostLikeService) *PostLikeHandle
 	return &PostLikeHandler{postLikeService: postLikeService}
 }
 
-// LikePost likes a post
 func (h *PostLikeHandler) LikePost(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
-	// Like the post
-	err = h.postLikeService.LikePost(c.Context(), postID, userID)
+	err := h.postLikeService.LikePost(c.Context(), postID, userID)
 	if err != nil {
-		if err.Error() == "user has already liked this post" {
+		if errors.Is(err, apperrors.ErrInvalidPostID) || errors.Is(err, apperrors.ErrInvalidUserID) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
+		if errors.Is(err, apperrors.ErrPostNotFound) {
+			return response.NotFound(c, "Post not found", err)
+		}
+		if errors.Is(err, apperrors.ErrAlreadyLiked) {
 			return response.BadRequest(c, "You have already liked this post", nil)
 		}
 		return response.InternalServerError(c, "Failed to like post", err)
@@ -42,22 +46,26 @@ func (h *PostLikeHandler) LikePost(c fiber.Ctx) error {
 	return response.Success(c, "Post liked successfully", nil)
 }
 
-// UnlikePost unlikes a post
 func (h *PostLikeHandler) UnlikePost(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
-	// Unlike the post
-	err = h.postLikeService.UnlikePost(c.Context(), postID, userID)
+	err := h.postLikeService.UnlikePost(c.Context(), postID, userID)
 	if err != nil {
-		if err.Error() == "user has not liked this post" {
+		if errors.Is(err, apperrors.ErrInvalidPostID) || errors.Is(err, apperrors.ErrInvalidUserID) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
+		if errors.Is(err, apperrors.ErrPostNotFound) {
+			return response.NotFound(c, "Post not found", err)
+		}
+		if errors.Is(err, apperrors.ErrNotLiked) {
 			return response.BadRequest(c, "You have not liked this post", nil)
 		}
 		return response.InternalServerError(c, "Failed to unlike post", err)
@@ -66,46 +74,24 @@ func (h *PostLikeHandler) UnlikePost(c fiber.Ctx) error {
 	return response.Success(c, "Post unliked successfully", nil)
 }
 
-// GetPostLikes gets likes for a specific post
 func (h *PostLikeHandler) GetPostLikes(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	// Parse pagination parameters
-	limitStr := c.Query("limit")
-	offsetStr := c.Query("offset")
+	limit, offset := ParsePaginationParams(c, 10)
 
-	limit := 10 // default
-	offset := 0 // default
-
-	if limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
-			limit = parsedLimit
-		}
-	}
-
-	if offsetStr != "" {
-		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
-			offset = parsedOffset
-		}
-	}
-
-	// Get likes
 	likes, total, err := h.postLikeService.GetLikesByPostID(c.Context(), postID, limit, offset)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidPostID) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
 		return response.InternalServerError(c, "Failed to get post likes", err)
 	}
 
-	// Convert to response format
-	likeResponses := make([]interface{}, len(likes))
-	for i, like := range likes {
-		likeResponses[i] = like.ToResponse()
-	}
-
 	responseData := map[string]any{
-		"likes":  likeResponses,
+		"likes":  likes,
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
@@ -114,7 +100,6 @@ func (h *PostLikeHandler) GetPostLikes(c fiber.Ctx) error {
 	return response.Success(c, "Post likes retrieved successfully", responseData)
 }
 
-// GetPostLikeStats gets like statistics for a post
 func (h *PostLikeHandler) GetPostLikeStats(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
@@ -123,30 +108,35 @@ func (h *PostLikeHandler) GetPostLikeStats(c fiber.Ctx) error {
 
 	stats, err := h.postLikeService.GetLikeStats(c.Context(), postID)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidPostID) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
 		return response.InternalServerError(c, "Failed to get like stats", err)
 	}
 
 	return response.Success(c, "Like stats retrieved successfully", stats)
 }
 
-// CheckUserLiked checks if the current user has liked a post
 func (h *PostLikeHandler) CheckUserLiked(c fiber.Ctx) error {
 	postID := c.Params("id")
 	if postID == "" {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
-	userID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "User authentication required")
 	}
 
 	hasLiked, err := h.postLikeService.HasUserLikedPost(c.Context(), postID, userID)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrInvalidPostID) || errors.Is(err, apperrors.ErrInvalidUserID) {
+			return response.BadRequest(c, err.Error(), nil)
+		}
 		return response.InternalServerError(c, "Failed to check like status", err)
 	}
 
-	responseData := map[string]interface{}{
+	responseData := map[string]any{
 		"has_liked": hasLiked,
 		"post_id":   postID,
 		"user_id":   userID,

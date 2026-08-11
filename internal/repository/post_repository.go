@@ -2,40 +2,36 @@ package repository
 
 import (
 	"context"
-	"errors" // For gorm.ErrRecordNotFound checks
-	"fmt"    // For error wrapping
-	"math/rand"
+	"errors"
+	"fmt"
 
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
-	// "gorm.io/gorm/clause" // For Preload with conditions if needed - will add if used
-)
-
-// Define common errors or use gorm.ErrRecordNotFound directly
-var (
-	ErrPostNotFound = errors.New("post not found")
 )
 
 type PostRepository interface {
-	CreatePost(ctx context.Context, post *model.CreatePostDTO, userID string) (*model.Post, error)
-	CreatePostWithTags(ctx context.Context, post *model.CreatePostDTO, userID string, tags []model.Tag) (*model.Post, error)
+	CreatePost(ctx context.Context, post *model.Post) error
+	CreatePostWithTags(ctx context.Context, post *model.Post, tags []model.Tag) (*model.Post, error)
 	GetPosts(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error)
-	GetPostsFiltered(ctx context.Context, filter *model.PostQueryFilter) ([]*model.Post, int64, error)
+	GetPostsFiltered(ctx context.Context, filter *dto.PostQueryFilter) ([]*model.Post, int64, error)
 	GetPostByUsername(ctx context.Context, username string, offset int, limit int) ([]*model.Post, int64, error)
 	GetPostsRandom(ctx context.Context, limit int) ([]*model.Post, error)
+	GetPostsTrending(ctx context.Context, limit int) ([]*model.Post, error)
 	GetPostByID(ctx context.Context, id string) (*model.Post, error)
 	GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.Post, error)
 	GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.Post, int64, error)
 	DeletePostByID(ctx context.Context, id string) error
-	UpdatePost(ctx context.Context, id string, post *model.UpdatePostDTO) (*model.Post, error)
-
-	// Additional functions
+	UpdatePost(ctx context.Context, id string, updates map[string]any) (*model.Post, error)
+	GetPostsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapPost, error)
 	SearchPosts(ctx context.Context, keyword string, limit int, offset int) ([]*model.Post, int64, error)
 	GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.Post, int64, error)
+	GetPostsForYou(ctx context.Context, userID string, offset int, limit int) ([]*model.Post, int64, error)
 	ExistsByID(ctx context.Context, id string) (bool, error)
-	GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error)
-	GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error)
+	GetAuthorPostStats(ctx context.Context, userID string) (*dto.MyPostsAnalyticsSummary, error)
+	GetTopPostsByAuthor(ctx context.Context, userID string, limit int) ([]dto.MyPostPerformance, error)
 }
 
 type postRepository struct {
@@ -46,54 +42,33 @@ func NewPostRepository(db *gorm.DB) PostRepository {
 	return &postRepository{db: db}
 }
 
-func (r *postRepository) UpdatePost(ctx context.Context, id string, postDTO *model.UpdatePostDTO) (*model.Post, error) {
-	// Check if the post exists first (optional, Updates will return RowsAffected = 0 if not found)
-	// var existingCheck model.Post
-	// if err := r.db.WithContext(ctx).Select("id").First(&existingCheck, "id = ?", id).Error; err != nil {
-	// 	if errors.Is(err, gorm.ErrRecordNotFound) {
-	// 		return nil, ErrPostNotFound
-	// 	}
-	// 	return nil, fmt.Errorf("error checking post existence before update: %w", err)
-	// }
+func (r *postRepository) CreatePost(ctx context.Context, post *model.Post) error {
+	return r.db.WithContext(ctx).Create(post).Error
+}
 
-	// Create a map for updates to handle partial updates and zero values correctly if needed.
-	// If UpdatePostDTO fields are pointers, checking for nil is good.
-	// If they are value types, GORM's Updates() on a struct will only update non-zero fields by default.
-	// Using a map gives more control.
-	updates := make(map[string]interface{})
+func (r *postRepository) CreatePostWithTags(ctx context.Context, post *model.Post, tags []model.Tag) (*model.Post, error) {
+	post.Tags = tags
 
-	// UpdatePostDTO fields are value types (string), so check for non-empty.
-	if postDTO.Title != "" {
-		updates["title"] = postDTO.Title
-	}
-	if postDTO.Body != "" {
-		updates["body"] = postDTO.Body
-	}
-	if postDTO.Slug != "" {
-		updates["slug"] = postDTO.Slug
-	}
-	if postDTO.Photo_url != "" {
-		updates["photo_url"] = postDTO.Photo_url
-	}
-	if postDTO.Published != nil {
-		updates["published"] = *postDTO.Published
+	err := r.db.WithContext(ctx).Create(post).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to create post with tags: %w", err)
 	}
 
-	// Handling Tags update is more complex and usually done via Associations.
-	// For now, focusing on simple field updates.
-	// if len(postDTO.Tags) > 0 { /* logic to update tags */ }
+	err = r.db.WithContext(ctx).Preload("User", preloadUserBrief).Preload("Tags").First(post, "id = ?", post.ID).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to load created post with associations: %w", err)
+	}
 
-	if len(updates) == 0 && len(postDTO.Tags) == 0 { // Check if DTO is effectively empty for updates
-		// No actual fields to update based on DTO content, and no tags to update.
-		// Fetch and return the current post.
-		// For now, let's assume an empty DTO means no operation or an error.
-		// Or, if DTO might only contain tags to update, handle that separately.
-		// We should fetch the post to return it, even if no fields changed.
+	return post, nil
+}
+
+func (r *postRepository) UpdatePost(ctx context.Context, id string, updates map[string]any) (*model.Post, error) {
+	if len(updates) == 0 {
 		var currentPost model.Post
-		err := r.db.WithContext(ctx).Preload("User").Preload("Tags").First(&currentPost, "id = ?", id).Error
+		err := r.db.WithContext(ctx).Preload("User", preloadUserBrief).Preload("Tags").First(&currentPost, "id = ?", id).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, ErrPostNotFound
+				return nil, apperrors.ErrPostNotFound
 			}
 			return nil, fmt.Errorf("failed to fetch post (no updates provided): %w", err)
 		}
@@ -105,154 +80,97 @@ func (r *postRepository) UpdatePost(ctx context.Context, id string, postDTO *mod
 		return nil, fmt.Errorf("failed to update post: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return nil, ErrPostNotFound // Post with ID not found
+		return nil, apperrors.ErrPostNotFound
 	}
 
-	// After updating, fetch the post again to get the full model with associations
 	var updatedPost model.Post
-	err := r.db.WithContext(ctx).Preload("User").Preload("Tags").First(&updatedPost, "id = ?", id).Error
+	err := r.db.WithContext(ctx).Preload("User", preloadUserBrief).Preload("Tags").First(&updatedPost, "id = ?", id).Error
 	if err != nil {
-		// This case (update succeeded but fetch failed) should be rare but handled.
 		return nil, fmt.Errorf("post updated, but failed to retrieve updated record: %w", err)
 	}
-
-	// TODO: Handle Tags update if postDTO.Tags is provided.
-	// This typically involves using GORM's association mode:
-	// if postDTO.Tags != nil {
-	//   // Convert DTO tags to []model.Tag or list of IDs
-	//   // e.g., r.db.Model(&updatedPost).Association("Tags").Replace(newTags)
-	// }
 
 	return &updatedPost, nil
 }
 
-func (r *postRepository) CreatePost(ctx context.Context, postDTO *model.CreatePostDTO, userID string) (*model.Post, error) {
-	newpost := &model.Post{
-		Title:     &postDTO.Title,
-		Slug:      &postDTO.Slug,
-		Body:      &postDTO.Body,
-		CreatedBy: &userID,
-		PhotoURL:  &postDTO.Photo_url,
-		Published: &postDTO.Published,
-	}
-
-	err := r.db.WithContext(ctx).Create(newpost).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to create post: %w", err)
-	}
-	return newpost, nil // Returning the instance passed to Create. ID should be populated.
-}
-
-func (r *postRepository) CreatePostWithTags(ctx context.Context, postDTO *model.CreatePostDTO, userID string, tags []model.Tag) (*model.Post, error) {
-	newpost := &model.Post{
-		Title:     &postDTO.Title,
-		Slug:      &postDTO.Slug,
-		Body:      &postDTO.Body,
-		CreatedBy: &userID,
-		PhotoURL:  &postDTO.Photo_url,
-		Published: &postDTO.Published,
-		Tags:      tags, // Associate tags with the post
-	}
-
-	// Create the post with associated tags
-	err := r.db.WithContext(ctx).Create(newpost).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to create post with tags: %w", err)
-	}
-
-	// Load the created post with all associations for return
-	err = r.db.WithContext(ctx).Preload("User").Preload("Tags").First(newpost, "id = ?", newpost.ID).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to load created post with associations: %w", err)
-	}
-
-	return newpost, nil
-}
-
 func (r *postRepository) GetPostByUsername(ctx context.Context, username string, offset int, limit int) ([]*model.Post, int64, error) {
+	var posts []*model.Post
 	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
+
+	query := r.db.WithContext(ctx).Model(&model.Post{}).
 		Joins("JOIN users ON users.id = posts.created_by").
-		Where("users.username = ?", username).
-		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count posts for username %s: %w", username, countErr)
+		Where("users.username = ? AND users.deleted_at IS NULL", username)
+
+	err := query.Count(&count).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts for username %s: %w", username, err)
 	}
 
-	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+	err = r.db.WithContext(ctx).Model(&model.Post{}).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
 		Joins("JOIN users ON users.id = posts.created_by").
-		Where("users.username = ?", username).
+		Where("users.username = ? AND users.deleted_at IS NULL", username).
 		Order("posts.created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&posts).Error
+
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts for username %s: %w", username, err)
 	}
+
 	return posts, count, nil
 }
 
 func (r *postRepository) DeletePostByID(ctx context.Context, id string) error {
-	// Assumes soft delete if model.Post has gorm.DeletedAt field.
-	// If hard delete is needed, use Unscoped().Delete()
 	result := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Post{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete post: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrPostNotFound // Or specific error
+		return apperrors.ErrPostNotFound
 	}
 	return nil
 }
 
 func (r *postRepository) GetPosts(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error) {
+	var posts []*model.Post
 	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("published = ?", true).
+
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Where("posts.published = ?", true).
 		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count posts: %w", countErr)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
 	}
 
-	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+	err = activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
-		Where("published = ?", true).
-		Order("created_at DESC").
+		Where("posts.published = ?", true).
+		Order("posts.created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&posts).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get posts: %w", err)
 	}
+
 	return posts, count, nil
 }
 
 func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug string, username string) (*model.Post, error) {
-	// Resolve username to user ID first (uses index on users.username), then fetch post by
-	// created_by + slug (uses unique index on posts). Avoids JOIN that can cause 42P01 and uses indexes.
-	var userID string
-	err := r.db.WithContext(ctx).Model(&model.User{}).
-		Where("username = ?", username).
-		Limit(1).
-		Pluck("id", &userID).Error
-	if err != nil || userID == "" {
-		return nil, ErrPostNotFound
-	}
-
 	var post model.Post
-	err = r.db.WithContext(ctx).
-		Preload("User").
+	err := r.db.WithContext(ctx).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
-		Where("slug = ? AND created_by = ?", slug, userID).
+		Joins("JOIN users ON users.id = posts.created_by").
+		Where("posts.slug = ? AND users.username = ? AND users.deleted_at IS NULL", slug, username).
 		First(&post).Error
+
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrPostNotFound
+			return nil, apperrors.ErrPostNotFound
 		}
 		return nil, fmt.Errorf("failed to get post by slug '%s' and username '%s': %w", slug, username, err)
 	}
@@ -261,14 +179,15 @@ func (r *postRepository) GetPostBySlugAndUsername(ctx context.Context, slug stri
 
 func (r *postRepository) GetPostByID(ctx context.Context, id string) (*model.Post, error) {
 	var post model.Post
-	err := r.db.WithContext(ctx).
-		Preload("User").                 // Assuming Post model has a User field (struct or ID)
-		Preload("Tags").                 // Assuming Post model has a Tags field (slice of Tag)
-		First(&post, "id = ?", id).Error // GORM uses primary key by default if just `id` is passed to First
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
+		Preload("Tags").
+		Where("posts.id = ?", id).
+		First(&post).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrPostNotFound
+			return nil, apperrors.ErrPostNotFound
 		}
 		return nil, fmt.Errorf("failed to get post by ID: %w", err)
 	}
@@ -277,34 +196,11 @@ func (r *postRepository) GetPostByID(ctx context.Context, id string) (*model.Pos
 
 func (r *postRepository) GetPostsRandom(ctx context.Context, limit int) ([]*model.Post, error) {
 	var randomPosts []*model.Post
-	if limit <= 0 {
-		limit = 6
-	}
-
-	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.Post{}).Where("published = ?", true).Count(&count).Error; err != nil {
-		return nil, fmt.Errorf("failed to count published posts: %w", err)
-	}
-	if count == 0 {
-		return randomPosts, nil
-	}
-
-	maxOffset := int(count) - limit
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-
-	offset := 0
-	if maxOffset > 0 {
-		offset = rand.Intn(maxOffset + 1)
-	}
-
-	err := r.db.WithContext(ctx).
-		Preload("User").
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
-		Where("published = ?", true).
-		Order("created_at DESC").
-		Offset(offset).
+		Where("posts.published = ?", true).
+		Order("RANDOM()").
 		Limit(limit).
 		Find(&randomPosts).Error
 
@@ -314,47 +210,101 @@ func (r *postRepository) GetPostsRandom(ctx context.Context, limit int) ([]*mode
 	return randomPosts, nil
 }
 
-func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.Post, int64, error) {
-	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("created_by = ?", createdBy).
-		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count posts by user ID %s: %w", createdBy, countErr)
+func (r *postRepository) GetPostsTrending(ctx context.Context, limit int) ([]*model.Post, error) {
+	var posts []*model.Post
+
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
+		Preload("Tags").
+		Where("posts.published = ?", true).
+		Order("posts.like_count * 2 + posts.bookmark_count * 2 + posts.view_count DESC").
+		Limit(limit).
+		Find(&posts).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trending posts: %w", err)
 	}
 
+	return posts, nil
+}
+
+func (r *postRepository) GetPostsByCreatedBy(ctx context.Context, createdBy string, offset int, limit int) ([]*model.Post, int64, error) {
 	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+	var count int64
+
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Where("posts.created_by = ?", createdBy).
+		Count(&count).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts by creator ID %s: %w", createdBy, err)
+	}
+
+	err = activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
-		Where("created_by = ?", createdBy).
-		Order("created_at DESC").
+		Where("posts.created_by = ?", createdBy).
+		Order("posts.created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&posts).Error
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get posts by user ID %s: %w", createdBy, err)
+		return nil, 0, fmt.Errorf("failed to get posts by creator ID %s: %w", createdBy, err)
 	}
 	return posts, count, nil
 }
 
-// SearchPosts allows searching posts by keyword in title or body.
-func (r *postRepository) SearchPosts(ctx context.Context, keyword string, limit int, offset int) ([]*model.Post, int64, error) {
-	likePattern := "%" + keyword + "%"
+func (r *postRepository) GetPostsForYou(ctx context.Context, userID string, offset int, limit int) ([]*model.Post, int64, error) {
+	var posts []*model.Post
 	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("(title ILIKE ? OR body ILIKE ?) AND published = ?", likePattern, likePattern, true).
-		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count searched posts: %w", countErr)
+
+	if userID == "" {
+		return []*model.Post{}, 0, nil
 	}
 
-	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+	followingIDs := r.db.WithContext(ctx).Model(&model.UserFollow{}).
+		Select("following_id").
+		Where("follower_id = ?", userID)
+
+	base := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Where("posts.published = ?", true).
+		Where("posts.created_by = ? OR posts.created_by IN (?)", userID, followingIDs)
+
+	if err := base.Count(&count).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count for-you posts: %w", err)
+	}
+
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
-		Where("(title ILIKE ? OR body ILIKE ?) AND published = ?", likePattern, likePattern, true).
-		Order("created_at DESC").
+		Where("posts.published = ?", true).
+		Where("posts.created_by = ? OR posts.created_by IN (?)", userID, followingIDs).
+		Order("posts.created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get for-you posts: %w", err)
+	}
+
+	return posts, count, nil
+}
+
+func (r *postRepository) SearchPosts(ctx context.Context, keyword string, limit int, offset int) ([]*model.Post, int64, error) {
+	var posts []*model.Post
+	var count int64
+	likePattern := "%" + keyword + "%"
+
+	err := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Where("(posts.title ILIKE ? OR posts.body ILIKE ?) AND posts.published = ?", likePattern, likePattern, true).
+		Count(&count).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts for search: %w", err)
+	}
+
+	err = activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
+		Preload("Tags").
+		Where("(posts.title ILIKE ? OR posts.body ILIKE ?) AND posts.published = ?", likePattern, likePattern, true).
+		Order("posts.created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&posts).Error
@@ -364,22 +314,25 @@ func (r *postRepository) SearchPosts(ctx context.Context, keyword string, limit 
 	return posts, count, nil
 }
 
-// GetPostsByTag fetches posts with a specific tag name.
 func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit int, offset int) ([]*model.Post, int64, error) {
+	var posts []*model.Post
 	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
+
+	query := r.db.WithContext(ctx).Model(&model.Post{}).
+		Joins("JOIN users ON users.id = posts.created_by AND users.deleted_at IS NULL").
 		Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
 		Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
-		Where("tags.name = ? AND posts.published = ?", tag, true).
-		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count posts by tag: %w", countErr)
+		Where("tags.name = ? AND posts.published = ?", tag, true)
+
+	err := query.Count(&count).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts by tag: %w", err)
 	}
 
-	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
+	err = r.db.WithContext(ctx).Model(&model.Post{}).
+		Preload("User", preloadUserBrief).
 		Preload("Tags").
+		Joins("JOIN users ON users.id = posts.created_by AND users.deleted_at IS NULL").
 		Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
 		Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
 		Where("tags.name = ? AND posts.published = ?", tag, true).
@@ -393,34 +346,6 @@ func (r *postRepository) GetPostsByTag(ctx context.Context, tag string, limit in
 	return posts, count, nil
 }
 
-// GetPostsSitemap returns slug, author username, and timestamps for published posts (sitemap URLs).
-func (r *postRepository) GetPostsSitemap(ctx context.Context, limit int) ([]model.PostSitemapEntry, int64, error) {
-	var total int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
-		Joins("JOIN users ON users.id = posts.created_by").
-		Where("posts.published = ?", true).
-		Count(&total).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count posts for sitemap: %w", countErr)
-	}
-
-	var entries []model.PostSitemapEntry
-	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Select("posts.slug, users.username, posts.created_at, posts.updated_at").
-		Joins("JOIN users ON users.id = posts.created_by").
-		Where("posts.published = ?", true).
-		Order("posts.updated_at DESC")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	err := query.Scan(&entries).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get posts for sitemap: %w", err)
-	}
-	return entries, total, nil
-}
-
-// ExistsByID checks if a post exists by its ID.
 func (r *postRepository) ExistsByID(ctx context.Context, id string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Post{}).Where("id = ?", id).Count(&count).Error
@@ -430,92 +355,62 @@ func (r *postRepository) ExistsByID(ctx context.Context, id string) (bool, error
 	return count > 0, nil
 }
 
-// GetPostsFiltered fetches posts with advanced filtering options
-func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.PostQueryFilter) ([]*model.Post, int64, error) {
+func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *dto.PostQueryFilter) ([]*model.Post, int64, error) {
 	var posts []*model.Post
 	var count int64
 
-	// Select only columns required for list/feed responses and trim body payload.
-	selectColumns := []string{
-		"posts.id",
-		"posts.created_at",
-		"posts.updated_at",
-		"posts.deleted_at",
-		"posts.title",
-		"posts.created_by",
-		"LEFT(posts.body, 300) AS body",
-		"posts.slug",
-		"posts.photo_url",
-		"posts.published",
-		"posts.view_count",
-		"posts.like_count",
-	}
-
-	// Build the base query
-	query := r.db.WithContext(ctx).Model(&model.Post{}).
-		Select(selectColumns).
-		Preload("User", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id", "username", "image", "first_name", "last_name")
-		}).
+	query := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{})).
+		Preload("User", preloadUserBrief).
 		Preload("Tags")
 
-	// Apply search filter
 	if filter.Search != "" {
 		likePattern := "%" + filter.Search + "%"
-		query = query.Where("title ILIKE ? AND published = ?", likePattern, true)
+		query = query.Where("posts.title ILIKE ? AND posts.published = ?", likePattern, true)
 	} else {
-		// If no search, still filter by published status
-		query = query.Where("published = ?", true)
+		query = query.Where("posts.published = ?", true)
 	}
 
-	// Apply date range filter
 	if filter.StartDate != "" {
-		query = query.Where("created_at >= ?", filter.StartDate)
+		query = query.Where("posts.created_at >= ?", filter.StartDate)
 	}
 	if filter.EndDate != "" {
-		query = query.Where("created_at <= ?", filter.EndDate)
+		query = query.Where("posts.created_at <= ?", filter.EndDate)
 	}
 
-	// Apply published status filter (only if search is not provided)
 	if filter.Search == "" && filter.Published != nil {
-		query = query.Where("published = ?", *filter.Published)
+		query = query.Where("posts.published = ?", *filter.Published)
 	}
 
-	// Apply author filter
 	if filter.CreatedBy != "" {
-		query = query.Where("created_by = ?", filter.CreatedBy)
+		query = query.Where("posts.created_by = ?", filter.CreatedBy)
 	}
 
-	// Apply tags filter
 	if len(filter.Tags) > 0 {
 		query = query.Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
 			Joins("JOIN tags ON tags.id = posts_to_tags.tag_id").
 			Where("tags.name IN ?", filter.Tags)
 	}
-	query = query.Distinct()
 
-	// Count total records
-	countQuery := r.db.WithContext(ctx).Model(&model.Post{})
+	countQuery := activePostUserJoin(r.db.WithContext(ctx).Model(&model.Post{}))
 
-	// Apply same filters to count query
 	if filter.Search != "" {
 		likePattern := "%" + filter.Search + "%"
-		countQuery = countQuery.Where("title ILIKE ? AND published = ?", likePattern, true)
+		countQuery = countQuery.Where("posts.title ILIKE ? AND posts.published = ?", likePattern, true)
 	} else {
-		countQuery = countQuery.Where("published = ?", true)
+		countQuery = countQuery.Where("posts.published = ?", true)
 	}
 
 	if filter.StartDate != "" {
-		countQuery = countQuery.Where("created_at >= ?", filter.StartDate)
+		countQuery = countQuery.Where("posts.created_at >= ?", filter.StartDate)
 	}
 	if filter.EndDate != "" {
-		countQuery = countQuery.Where("created_at <= ?", filter.EndDate)
+		countQuery = countQuery.Where("posts.created_at <= ?", filter.EndDate)
 	}
 	if filter.Search == "" && filter.Published != nil {
-		countQuery = countQuery.Where("published = ?", *filter.Published)
+		countQuery = countQuery.Where("posts.published = ?", *filter.Published)
 	}
 	if filter.CreatedBy != "" {
-		countQuery = countQuery.Where("created_by = ?", filter.CreatedBy)
+		countQuery = countQuery.Where("posts.created_by = ?", filter.CreatedBy)
 	}
 	if len(filter.Tags) > 0 {
 		countQuery = countQuery.Joins("JOIN posts_to_tags ON posts_to_tags.post_id = posts.id").
@@ -523,20 +418,17 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 			Where("tags.name IN ?", filter.Tags)
 	}
 
-	err := countQuery.Distinct("posts.id").Count(&count).Error
+	err := countQuery.Count(&count).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
 	}
 
-	// Apply sorting
 	sortField := filter.GetSortField()
 	sortOrder := filter.GetSortOrder()
 	query = query.Order(fmt.Sprintf("%s %s", sortField, sortOrder))
 
-	// Apply pagination
 	query = query.Limit(filter.Limit).Offset(filter.Offset)
 
-	// Execute the query
 	err = query.Find(&posts).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get filtered posts: %w", err)
@@ -545,27 +437,61 @@ func (r *postRepository) GetPostsFiltered(ctx context.Context, filter *model.Pos
 	return posts, count, nil
 }
 
-// GetPostsTrending fetches trending posts based on views and likes
-func (r *postRepository) GetPostsTrending(ctx context.Context, limit int, offset int) ([]*model.Post, int64, error) {
-	var count int64
-	countErr := r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("published = ?", true).
-		Count(&count).Error
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("failed to count trending posts: %w", countErr)
+func (r *postRepository) GetPostsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapPost, error) {
+	var sitemapPosts []*dto.SitemapPost
+
+	err := r.db.WithContext(ctx).
+		Table("posts").
+		Select("users.username, posts.slug, posts.created_at, posts.updated_at").
+		Joins("JOIN users ON users.id = posts.created_by").
+		Where("posts.published = ? AND users.deleted_at IS NULL", true).
+		Order("posts.created_at DESC").
+		Limit(limit).
+		Find(&sitemapPosts).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get posts for sitemap: %w", err)
 	}
 
-	var posts []*model.Post
-	err := r.db.WithContext(ctx).Model(&model.Post{}).
-		Preload("User").
-		Preload("Tags").
-		Where("published = ?", true).
-		Order("(like_count * 2 + view_count) DESC, created_at DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&posts).Error
+	return sitemapPosts, nil
+}
+
+func (r *postRepository) GetAuthorPostStats(ctx context.Context, userID string) (*dto.MyPostsAnalyticsSummary, error) {
+	stats := &dto.MyPostsAnalyticsSummary{}
+	err := r.db.WithContext(ctx).
+		Table("posts").
+		Select(`
+			COUNT(*) AS total_posts,
+			COUNT(*) FILTER (WHERE published = true) AS published_posts,
+			COALESCE(SUM(view_count), 0) AS total_views,
+			COALESCE(SUM(like_count), 0) AS total_likes
+		`).
+		Where("created_by = ?", userID).
+		Scan(stats).Error
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get trending posts: %w", err)
+		return nil, fmt.Errorf("failed to get author post stats: %w", err)
 	}
-	return posts, count, nil
+	return stats, nil
+}
+
+func (r *postRepository) GetTopPostsByAuthor(ctx context.Context, userID string, limit int) ([]dto.MyPostPerformance, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	var posts []dto.MyPostPerformance
+	err := r.db.WithContext(ctx).
+		Table("posts").
+		Select("id, title, slug, view_count, like_count").
+		Where("created_by = ?", userID).
+		Order("view_count DESC, like_count DESC, created_at DESC").
+		Limit(limit).
+		Scan(&posts).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get top posts by author: %w", err)
+	}
+	return posts, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,66 +13,62 @@ import (
 	"fiberbackend/config"
 	"fiberbackend/internal/di"
 	"fiberbackend/internal/middleware"
-	"fiberbackend/pkg/logger"
-	"fiberbackend/pkg/validator"
+	"fiberbackend/pkg/applog"
+	"fiberbackend/pkg/response"
 
 	"github.com/gofiber/fiber/v3"
 )
 
 func main() {
-	// load config
+	applog.SetupFromEnv()
+
 	conf, errconf := config.Load()
 	if errconf != nil {
+		slog.Error("failed to load config", "error", errconf)
 		panic(errconf)
 	}
 
-	// Initialize structured logger
-	log := logger.New(conf.ParseLogLevel(), conf.LogFormat, true)
-
-	log.Info("starting application",
-		logger.String("port", conf.AppPort),
-		logger.String("log_level", conf.LogLevel),
-		logger.String("log_format", conf.LogFormat),
-		logger.Bool("debug", conf.Debug),
-	)
+	applog.Setup(conf.App.Debug)
 
 	// Initialize dependency container
 	container, err := di.NewContainer(conf)
 	if err != nil {
-		log.Error("failed to initialize container", logger.Err(err))
+		slog.Error("failed to initialize container", "error", err)
 		panic(err)
 	}
 
-	// Initialize Fiber with custom error handler so API always returns JSON
 	app := fiber.New(fiber.Config{
-		ReadTimeout:     10 * time.Second,
-		WriteTimeout:    15 * time.Second,
-		IdleTimeout:     60 * time.Second,
-		BodyLimit:       10 * 1024 * 1024,
-		StructValidator: validator.NewValidator(),
-		ErrorHandler:    jsonErrorHandler,
+		AppName:   "fiberbackend",
+		BodyLimit: 10 * 1024 * 1024, // 10MB request body limit
+		// When TrustProxy is enabled, client IP is extracted from
+		// X-Forwarded-For. Use only behind a trusted reverse proxy.
+		TrustProxy: conf.HTTP.TrustProxy,
+		TrustProxyConfig: fiber.TrustProxyConfig{
+			Proxies: conf.TrustedProxyCIDRs(),
+		},
 	})
 
-	// Setup global middleware first (applies to all routes)
+	// Global middleware must be registered before routes so CORS, security
+	// headers, rate limiting, and recover apply to all endpoints.
 	middleware.InitMiddleware(app, conf)
 
-	// Setup routes
+	// Initialize routes with manually wired dependencies
 	container.Routes.Setup(app)
-
-	// Health and readiness endpoints
-	app.Get("/health", healthCheck)
-	app.Get("/ready", readinessCheck)
 
 	app.Get("/", helloWorld)
 
-	// Start server in a goroutine
+	// Health check endpoint — used by Docker HEALTHCHECK and load balancers.
+	// Returns 200 when the DB is reachable, 503 otherwise.
+	app.Get("/health", func(c fiber.Ctx) error {
+		return healthCheck(c, container)
+	})
+
+	// Start server in a goroutine.
 	go func() {
-		log.Info("starting server",
-			logger.String("port", conf.AppPort),
-			logger.String("address", "http://localhost:"+conf.AppPort),
-		)
-		if err := app.Listen(":" + conf.AppPort); err != nil && err != http.ErrServerClosed {
-			log.Error("server shutdown error", logger.Err(err))
+		slog.Info("starting server", "port", conf.HTTP.Port)
+		addr := ":" + conf.HTTP.Port
+		if err := app.Listen(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server exited unexpectedly", "error", err)
 		}
 	}()
 
@@ -80,57 +77,49 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Info("shutting down server")
+	slog.Info("server is shutting down")
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Shutdown Fiber server
 	if err := app.ShutdownWithContext(ctx); err != nil {
-		log.Error("server forced to shutdown", logger.Err(err))
+		slog.Error("server forced to shutdown", "error", err)
 	}
 
 	// Cleanup resources
-	if err := container.Cleanup.CleanupWithTimeout(5 * time.Second); err != nil {
-		log.Warn("cleanup failed", logger.Err(err))
-	} else {
-		log.Info("resources cleaned up successfully")
+	cleanup, err := di.GetCleanupManager(container)
+	if err != nil {
+		slog.Error("failed to get cleanup manager", "error", err)
+	} else if cleanup != nil {
+		if err := cleanup.CleanupWithTimeout(5 * time.Second); err != nil {
+			slog.Error("cleanup failed", "error", err)
+		} else {
+			slog.Info("resources cleaned up successfully")
+		}
 	}
 
-	log.Info("server exited")
-}
-
-func healthCheck(c fiber.Ctx) error {
-	return c.Status(http.StatusOK).JSON(map[string]any{
-		"status":  "healthy",
-		"success": true,
-	})
-}
-
-func readinessCheck(c fiber.Ctx) error {
-	return c.Status(http.StatusOK).JSON(map[string]any{
-		"status":  "ready",
-		"success": true,
-	})
-}
-
-func jsonErrorHandler(c fiber.Ctx, err error) error {
-	code := http.StatusInternalServerError
-	var e *fiber.Error
-	if errors.As(err, &e) {
-		code = e.Code
-	}
-	return c.Status(code).JSON(map[string]any{
-		"success": false,
-		"message": "Request failed",
-		"error":   err.Error(),
-	})
+	slog.Info("server exited")
 }
 
 func helloWorld(c fiber.Ctx) error {
-	return c.Status(http.StatusOK).JSON(map[string]any{
-		"message": "Hello, World!",
-		"success": true,
+	return response.Success(c, "Hello, World!", nil)
+}
+
+// healthCheck pings the database and returns 200 OK or 503 Service Unavailable.
+func healthCheck(c fiber.Ctx, container *di.Container) error {
+	ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+	defer cancel()
+
+	if err := container.PingDB(ctx); err != nil {
+		slog.Warn("health check: database unreachable", "error", err)
+		return c.Status(http.StatusServiceUnavailable).JSON(map[string]string{
+			"status": "unhealthy",
+			"reason": "database unreachable",
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(map[string]string{
+		"status": "ok",
 	})
 }

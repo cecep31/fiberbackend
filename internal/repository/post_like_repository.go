@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"fmt"
-
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -13,9 +13,13 @@ type PostLikeRepository interface {
 	CreateLike(ctx context.Context, like *model.PostLike) error
 	DeleteLike(ctx context.Context, postID, userID string) error
 	GetLikesByPostID(ctx context.Context, postID string, limit, offset int) ([]*model.PostLike, int64, error)
-	GetLikeStats(ctx context.Context, postID string) (*model.PostLikeStats, error)
+	GetLikeStats(ctx context.Context, postID string) (*dto.PostLikeStats, error)
 	HasUserLikedPost(ctx context.Context, postID, userID string) (bool, error)
 	GetLikeByUserAndPost(ctx context.Context, postID, userID string) (*model.PostLike, error)
+	GetLikesByMonthByAuthor(ctx context.Context, userID string, start, endExclusive time.Time) ([]struct {
+		Month string
+		Count int64
+	}, error)
 }
 
 type postLikeRepository struct {
@@ -42,12 +46,12 @@ func (r *postLikeRepository) GetLikesByPostID(ctx context.Context, postID string
 
 	// Count total likes
 	if err := r.db.WithContext(ctx).Model(&model.PostLike{}).Where("post_id = ?", postID).Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to count likes: %w", err)
+		return nil, 0, err
 	}
 
 	// Get paginated likes with user information
 	err := r.db.WithContext(ctx).
-		Preload("User").
+		Preload("User", preloadUserBrief).
 		Where("post_id = ?", postID).
 		Order("created_at DESC").
 		Limit(limit).
@@ -57,8 +61,8 @@ func (r *postLikeRepository) GetLikesByPostID(ctx context.Context, postID string
 	return likes, total, err
 }
 
-func (r *postLikeRepository) GetLikeStats(ctx context.Context, postID string) (*model.PostLikeStats, error) {
-	var stats model.PostLikeStats
+func (r *postLikeRepository) GetLikeStats(ctx context.Context, postID string) (*dto.PostLikeStats, error) {
+	var stats dto.PostLikeStats
 	stats.PostID = postID
 
 	// Count total likes
@@ -68,28 +72,43 @@ func (r *postLikeRepository) GetLikeStats(ctx context.Context, postID string) (*
 		Count(&stats.TotalLikes).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get like stats: %w", err)
+		return nil, err
 	}
 
 	return &stats, nil
 }
 
 func (r *postLikeRepository) HasUserLikedPost(ctx context.Context, postID, userID string) (bool, error) {
-	var exists bool
-	err := r.db.WithContext(ctx).Raw(
-		`SELECT EXISTS (
-			SELECT 1
-			FROM post_likes
-			WHERE post_id = ? AND user_id = ? AND deleted_at IS NULL
-		)`,
-		postID,
-		userID,
-	).Scan(&exists).Error
-	return exists, err
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.PostLike{}).Where("post_id = ? AND user_id = ?", postID, userID).Count(&count).Error
+	return count > 0, err
 }
 
 func (r *postLikeRepository) GetLikeByUserAndPost(ctx context.Context, postID, userID string) (*model.PostLike, error) {
 	var like model.PostLike
-	err := r.db.WithContext(ctx).Preload("User").Where("post_id = ? AND user_id = ?", postID, userID).First(&like).Error
+	err := r.db.WithContext(ctx).Preload("User", preloadUserBrief).Where("post_id = ? AND user_id = ?", postID, userID).First(&like).Error
 	return &like, err
+}
+
+func (r *postLikeRepository) GetLikesByMonthByAuthor(ctx context.Context, userID string, start, endExclusive time.Time) ([]struct {
+	Month string
+	Count int64
+}, error) {
+	var rows []struct {
+		Month string
+		Count int64
+	}
+	err := r.db.WithContext(ctx).
+		Table("post_likes AS pl").
+		Select("TO_CHAR(DATE_TRUNC('month', pl.created_at), 'YYYY-MM') AS month, COUNT(*) AS count").
+		Joins("JOIN posts AS p ON p.id = pl.post_id AND p.deleted_at IS NULL").
+		Where("p.created_by = ?", userID).
+		Where("pl.created_at >= ? AND pl.created_at < ?", start, endExclusive).
+		Group("DATE_TRUNC('month', pl.created_at)").
+		Order("DATE_TRUNC('month', pl.created_at) ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

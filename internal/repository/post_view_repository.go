@@ -2,8 +2,7 @@ package repository
 
 import (
 	"context"
-	"fmt"
-
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 
 	"gorm.io/gorm"
@@ -12,10 +11,14 @@ import (
 type PostViewRepository interface {
 	CreateView(ctx context.Context, view *model.PostView) error
 	GetViewsByPostID(ctx context.Context, postID string, limit, offset int) ([]*model.PostView, int64, error)
-	GetViewStats(ctx context.Context, postID string) (*model.PostViewStats, error)
+	GetViewStats(ctx context.Context, postID string) (*dto.PostViewStats, error)
 	HasUserViewedPost(ctx context.Context, postID, userID string) (bool, error)
 	GetViewByUserAndPost(ctx context.Context, postID, userID string) (*model.PostView, error)
-	IncrementPostViewCount(ctx context.Context, postID string) error
+	GetViewTrendByAuthor(ctx context.Context, userID, startDate, endDate string) ([]struct {
+		Date  string
+		Count int64
+	}, error)
+	CountViewsByAuthorBefore(ctx context.Context, userID, beforeDate string) (int64, error)
 }
 
 type postViewRepository struct {
@@ -36,70 +39,59 @@ func (r *postViewRepository) GetViewsByPostID(ctx context.Context, postID string
 
 	// Count total views
 	if err := r.db.WithContext(ctx).Model(&model.PostView{}).Where("post_id = ?", postID).Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to count views: %w", err)
+		return nil, 0, err
 	}
 
-	// Get paginated views with user information
+	// Get paginated views (user_id only — no user preload needed)
 	err := r.db.WithContext(ctx).
-		Preload("User").
 		Where("post_id = ?", postID).
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&views).Error
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get views by post id: %w", err)
-	}
 
-	return views, total, nil
+	return views, total, err
 }
 
-func (r *postViewRepository) GetViewStats(ctx context.Context, postID string) (*model.PostViewStats, error) {
-	stats := &model.PostViewStats{PostID: postID}
+func (r *postViewRepository) GetViewStats(ctx context.Context, postID string) (*dto.PostViewStats, error) {
+	stats := &dto.PostViewStats{PostID: postID}
 
-	row := struct {
-		TotalViews         int64
-		UniqueViews        int64
-		AnonymousViews     int64
-		AuthenticatedViews int64
-	}{}
-
-	err := r.db.WithContext(ctx).Raw(`
-		SELECT
-			COUNT(*) AS total_views,
-			COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) AS unique_views,
-			COUNT(*) FILTER (WHERE user_id IS NULL) AS anonymous_views,
-			COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS authenticated_views
-		FROM post_views
-		WHERE post_id = ? AND deleted_at IS NULL
-	`, postID).Scan(&row).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to get view stats: %w", err)
+	// Total views
+	if err := r.db.WithContext(ctx).Model(&model.PostView{}).Where("post_id = ?", postID).Count(&stats.TotalViews).Error; err != nil {
+		return nil, err
 	}
 
-	stats.TotalViews = row.TotalViews
-	stats.UniqueViews = row.UniqueViews
-	stats.AnonymousViews = row.AnonymousViews
-	stats.AuthenticatedViews = row.AuthenticatedViews
+	// Unique views (distinct user_id where user_id is not null)
+	if err := r.db.WithContext(ctx).Model(&model.PostView{}).
+		Where("post_id = ? AND user_id IS NOT NULL", postID).
+		Distinct("user_id").
+		Count(&stats.UniqueViews).Error; err != nil {
+		return nil, err
+	}
+
+	// Anonymous views
+	if err := r.db.WithContext(ctx).Model(&model.PostView{}).
+		Where("post_id = ? AND user_id IS NULL", postID).
+		Count(&stats.AnonymousViews).Error; err != nil {
+		return nil, err
+	}
+
+	// Authenticated views
+	if err := r.db.WithContext(ctx).Model(&model.PostView{}).
+		Where("post_id = ? AND user_id IS NOT NULL", postID).
+		Count(&stats.AuthenticatedViews).Error; err != nil {
+		return nil, err
+	}
 
 	return stats, nil
 }
 
 func (r *postViewRepository) HasUserViewedPost(ctx context.Context, postID, userID string) (bool, error) {
-	var exists bool
-	err := r.db.WithContext(ctx).Raw(
-		`SELECT EXISTS (
-			SELECT 1
-			FROM post_views
-			WHERE post_id = ? AND user_id = ? AND deleted_at IS NULL
-		)`,
-		postID,
-		userID,
-	).Scan(&exists).Error
-	if err != nil {
-		return false, fmt.Errorf("failed to check if user viewed post: %w", err)
-	}
-	return exists, nil
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.PostView{}).
+		Where("post_id = ? AND user_id = ?", postID, userID).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *postViewRepository) GetViewByUserAndPost(ctx context.Context, postID, userID string) (*model.PostView, error) {
@@ -107,14 +99,39 @@ func (r *postViewRepository) GetViewByUserAndPost(ctx context.Context, postID, u
 	err := r.db.WithContext(ctx).
 		Where("post_id = ? AND user_id = ?", postID, userID).
 		First(&view).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to get view by user and post: %w", err)
-	}
-	return &view, nil
+	return &view, err
 }
 
-func (r *postViewRepository) IncrementPostViewCount(ctx context.Context, postID string) error {
-	return r.db.WithContext(ctx).Model(&model.Post{}).
-		Where("id = ?", postID).
-		Update("view_count", r.db.Raw("view_count + 1")).Error
+func (r *postViewRepository) GetViewTrendByAuthor(ctx context.Context, userID, startDate, endDate string) ([]struct {
+	Date  string
+	Count int64
+}, error) {
+	var rows []struct {
+		Date  string
+		Count int64
+	}
+	err := r.db.WithContext(ctx).
+		Table("post_views AS pv").
+		Select("DATE(pv.created_at) AS date, COUNT(*) AS count").
+		Joins("JOIN posts AS p ON p.id = pv.post_id AND p.deleted_at IS NULL").
+		Where("p.created_by = ? AND pv.deleted_at IS NULL", userID).
+		Where("DATE(pv.created_at) >= ? AND DATE(pv.created_at) <= ?", startDate, endDate).
+		Group("DATE(pv.created_at)").
+		Order("DATE(pv.created_at) ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *postViewRepository) CountViewsByAuthorBefore(ctx context.Context, userID, beforeDate string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("post_views AS pv").
+		Joins("JOIN posts AS p ON p.id = pv.post_id AND p.deleted_at IS NULL").
+		Where("p.created_by = ? AND pv.deleted_at IS NULL", userID).
+		Where("DATE(pv.created_at) < ?", beforeDate).
+		Count(&count).Error
+	return count, err
 }

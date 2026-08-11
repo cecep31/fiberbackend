@@ -4,25 +4,22 @@ import (
 	"time"
 
 	"fiberbackend/config"
-	"fiberbackend/pkg/logger"
+	"fiberbackend/pkg/applog"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/helmet"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
-	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
-func InitMiddleware(app *fiber.App, config *config.Config) {
-	// Create logger for middleware
-	log := logger.New(config.ParseLogLevel(), config.LogFormat, false)
+var httpLog = applog.Component("http")
 
+func InitMiddleware(app *fiber.App, config *config.Config) {
 	// Recover first so any panic in downstream middleware/handlers is caught
-	app.Use(recover.New(recover.Config{
-		EnableStackTrace: true,
-	}))
-	app.Use(requestid.New())
+	app.Use(RecoverWithLog())
+
+	// Body limit (10MB) is enforced via fasthttp.MaxRequestBodySize in the
+	// fiber.Config passed to fiber.New() (see cmd/main.go).
 
 	// Add security headers
 	app.Use(helmet.New(helmet.Config{
@@ -34,39 +31,30 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 		ReferrerPolicy:        "strict-origin-when-cross-origin",
 	}))
 
-	// Request logging with structured format
+	// Enhanced request logging with structured format
 	app.Use(func(c fiber.Ctx) error {
 		start := time.Now()
 		err := c.Next()
 
 		latency := time.Since(start)
-		statusCode := c.Response().StatusCode()
-
-		// Log with structured fields
-		log.Info("request handled",
-			logger.String("method", c.Method()),
-			logger.String("uri", c.OriginalURL()),
-			logger.String("request_id", c.Get(fiber.HeaderXRequestID)),
-			logger.Int("status", statusCode),
-			logger.Duration("latency_ms", latency),
-			logger.String("remote_ip", c.IP()),
-			logger.String("user_agent", c.Get(fiber.HeaderUserAgent)),
+		httpLog.Info("handled request",
+			"method", c.Method(),
+			"uri", c.OriginalURL(),
+			"status", c.Response().StatusCode(),
+			"latency_ms", float64(latency.Nanoseconds())/1e6,
+			"remote_ip", c.IP(),
 		)
 
 		return err
 	})
 
-	// Global rate limit per IP (429 when exceeded). TTL = window length in seconds.
-	if config.RateLimiterMax > 0 {
-		ttl := config.RateLimiterTTL
-		if ttl <= 0 {
-			ttl = 60
-		}
+	// Global HTTP rate limit (sustained RPS, token bucket; 0 = disabled)
+	if config.HTTP.RateLimitRPS > 0 {
 		app.Use(limiter.New(limiter.Config{
-			Max:        config.RateLimiterMax,
-			Expiration: time.Duration(ttl) * time.Second,
+			Max:        config.HTTP.RateLimitRPS * 2, // burst = 2x sustained RPS
+			Expiration: time.Second,
 		}))
 	}
 
-	app.Use(cors.New(cors.Config{AllowOrigins: []string{"*"}}))
+	app.Use(cors.New(cors.Config{AllowOrigins: config.HTTP.AllowOrigins}))
 }

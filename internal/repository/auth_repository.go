@@ -2,21 +2,19 @@ package repository
 
 import (
 	"context"
-	"errors" // Added for errors.Is
+	"errors"
 
+	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/model"
 
-	"gorm.io/gorm" // Added for gorm.DB and gorm.ErrRecordNotFound
-)
-
-// Re-define or import shared errors if necessary. For now, let's assume ErrUserNotFound is a concept.
-// We can use gorm.ErrRecordNotFound directly or wrap it.
-var (
-	ErrUserNotFoundAuth = errors.New("user not found for auth") // Specific error for this context or use a shared one
+	"github.com/jackc/pgx/v5/pgconn"
+	"gorm.io/gorm"
 )
 
 type AuthRepository interface {
 	FindUserByEmail(ctx context.Context, email string) (*model.User, error)
+	FindUserByIdentifier(ctx context.Context, identifier string) (*model.User, error)
+	FindUserByGithubID(ctx context.Context, githubID int64) (*model.User, error)
 	CreateUser(ctx context.Context, user *model.User) error
 }
 
@@ -34,25 +32,45 @@ func (r *authRepository) FindUserByEmail(ctx context.Context, email string) (*mo
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Option 1: Return a specific error for this repository
-			// return nil, ErrUserNotFoundAuth
-			// Option 2: Return gorm.ErrRecordNotFound directly if services handle it
-			// return nil, err
-			// Option 3: For consistency with UserRepository, let's use a similar pattern.
-			// If ErrUserNotFound is meant to be a general "user not found", it should be defined in a shared place.
-			// For now, returning a wrapped error or gorm.ErrRecordNotFound.
-			// Let's return a new error instance for clarity or the specific gorm error.
-			return nil, gorm.ErrRecordNotFound // Or a custom error like ErrUserNotFound from user_repository
+			return nil, apperrors.ErrUserNotFound
 		}
-		return nil, err // Other errors
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *authRepository) FindUserByIdentifier(ctx context.Context, identifier string) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).Where("email = ? OR username = ?", identifier, identifier).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.ErrUserNotFound
+		}
+		return nil, err
 	}
 	return &user, nil
 }
 
 func (r *authRepository) CreateUser(ctx context.Context, user *model.User) error {
-	// This CreateUser does not check for existence like in UserRepository.
-	// It will rely on DB constraints (e.g., unique email) to prevent duplicates.
-	// GORM's Create will return an error if a constraint is violated.
 	result := r.db.WithContext(ctx).Create(user)
-	return result.Error
+	if result.Error != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(result.Error, &pgErr) && pgErr.Code == "23505" {
+			return apperrors.ErrUserExists
+		}
+		return result.Error
+	}
+	return nil
+}
+
+func (r *authRepository) FindUserByGithubID(ctx context.Context, githubID int64) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).Where("github_id = ?", githubID).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
 }

@@ -3,76 +3,135 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"fiberbackend/config"
+	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
-	"fiberbackend/pkg/utils"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Service sentinel errors (deprecated: use pkg/utils errors)
-// Kept for backward compatibility, will be removed in future versions
-var (
-	ErrInvalidCredentials = utils.ErrInvalidCredentials
-	ErrUserExists         = utils.ErrUserAlreadyExists
-	ErrUserNotFound       = utils.ErrUserNotFound
-	ErrInvalidToken       = utils.ErrInvalidToken
-	ErrTokenExpired       = utils.ErrTokenExpired
-)
-
 type AuthService interface {
 	Register(ctx context.Context, email, username, password string) (*model.User, error)
-	Login(ctx context.Context, email, password string) (string, string, *model.User, error)
-	CheckUsernameAvailability(ctx context.Context, username string) (bool, error)
-	ForgotPassword(ctx context.Context, email string) error
-	ResetPassword(ctx context.Context, token, password string) error
-	RefreshToken(ctx context.Context, refreshToken string) (string, string, *model.User, error)
-	ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error
+	Login(ctx context.Context, identifier, password, ipAddress, userAgent string) (string, string, *model.User, error)
+	ForgotPassword(ctx context.Context, email, ipAddress, userAgent string) error
+	ResetPassword(ctx context.Context, token, password, ipAddress, userAgent string) error
+	RefreshToken(ctx context.Context, refreshToken, ipAddress, userAgent string) (string, string, *model.User, error)
+	ChangePassword(ctx context.Context, userID, currentPassword, newPassword, ipAddress, userAgent string) error
+	Logout(ctx context.Context, refreshToken string) error
+	GetProfile(ctx context.Context, userID string) (*model.User, error)
+	GetGithubOAuthURL(state string) string
+	GetGithubToken(ctx context.Context, code string) (string, error)
+	SignInWithGithub(ctx context.Context, githubUser *GithubUser, ipAddress, userAgent string) (string, string, *model.User, error)
+	CreateOAuthExchangeCode(ctx context.Context, accessToken, refreshToken string, user *model.User) (string, error)
+	ExchangeOAuthCode(ctx context.Context, code string) (string, string, *model.User, error)
+}
+
+type GithubUser struct {
+	Login     string  `json:"login"`
+	ID        int64   `json:"id"`
+	AvatarURL string  `json:"avatar_url"`
+	Email     *string `json:"email"`
+	Name      string  `json:"name"`
+	HTMLURL   string  `json:"html_url"`
+}
+
+type EmailSender interface {
+	EnqueuePasswordResetEmail(to, resetLink string) error
+	IsConfigured() bool
+}
+
+type AuthCache interface {
+	BuildKey(parts ...string) string
+	GetJSONAndDelete(ctx context.Context, key string, dest any) (bool, error)
+	SetJSONWithTTL(ctx context.Context, key string, value any, ttl time.Duration) error
 }
 
 type authService struct {
-	authRepo    repository.AuthRepository
-	userRepo    repository.UserRepository
-	sessionRepo repository.SessionRepository
-	jwtSecret   []byte
-	jwtExpiry   time.Duration
+	authRepo               repository.AuthRepository
+	userRepo               repository.UserRepository
+	sessionRepo            repository.SessionRepository
+	passwordResetTokenRepo repository.PasswordResetTokenRepository
+	activityService        AuthActivityService
+	jwtSecret              []byte
+	jwtExpiry              time.Duration
+	refreshTokenExpiry     time.Duration
+	githubConfig           config.GitHubConfig
+	frontendConfig         config.FrontendConfig
+	emailService           EmailSender
+	httpClient             *http.Client
+	oauthExchangeCache     AuthCache
+	oauthExchangeCodes     map[string]oauthExchangeEntry
+	oauthExchangeMu        sync.Mutex
 }
 
-func NewAuthService(authRepo repository.AuthRepository, userRepo repository.UserRepository, sessionRepo repository.SessionRepository, config *config.Config) AuthService {
+const oauthExchangeTTL = 2 * time.Minute
+
+type oauthExchangeEntry struct {
+	AccessToken  string
+	RefreshToken string
+	User         *model.User
+	ExpiresAt    time.Time
+}
+
+func NewAuthService(
+	authRepo repository.AuthRepository,
+	userRepo repository.UserRepository,
+	sessionRepo repository.SessionRepository,
+	passwordResetTokenRepo repository.PasswordResetTokenRepository,
+	activityService AuthActivityService,
+	config *config.Config,
+	oauthExchangeCache AuthCache,
+	emailService EmailSender,
+) AuthService {
 	return &authService{
-		authRepo:    authRepo,
-		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
-		jwtSecret:   []byte(config.JWTSecret),
-		jwtExpiry:   time.Duration(config.JWTExpirationHrs) * time.Hour,
+		authRepo:               authRepo,
+		userRepo:               userRepo,
+		sessionRepo:            sessionRepo,
+		passwordResetTokenRepo: passwordResetTokenRepo,
+		activityService:        activityService,
+		jwtSecret:              []byte(config.Auth.JWTSecret),
+		jwtExpiry:              config.Auth.JWTExpiry,
+		refreshTokenExpiry:     config.Auth.RefreshTokenExpiry,
+		githubConfig:           config.GitHub,
+		frontendConfig:         config.Frontend,
+		emailService:           emailService,
+		httpClient:             &http.Client{Timeout: 10 * time.Second},
+		oauthExchangeCache:     oauthExchangeCache,
+		oauthExchangeCodes:     make(map[string]oauthExchangeEntry),
 	}
 }
 
-// Register creates a new user account with the provided credentials
 func (s *authService) Register(ctx context.Context, email, username, password string) (*model.User, error) {
 	_, err := s.authRepo.FindUserByEmail(ctx, email)
 	if err == nil {
-		return nil, ErrUserExists
+		return nil, apperrors.ErrUserExists
+	}
+	if err != nil && !errors.Is(err, apperrors.ErrUserNotFound) {
+		return nil, err
 	}
 
-	// Check if username is already taken
 	err = s.userRepo.CheckUserByUsername(ctx, username)
-	if err == repository.ErrUserExists {
-		return nil, ErrUserExists
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to check username availability: %w", err)
+		return nil, err
 	}
 
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
+		return nil, err
 	}
 
 	hashedPassword := string(hashedPasswordBytes)
@@ -84,120 +143,384 @@ func (s *authService) Register(ctx context.Context, email, username, password st
 	}
 
 	if err := s.authRepo.CreateUser(ctx, newUser); err != nil {
-		return nil, fmt.Errorf("failed to create user: %w", err)
+		return nil, err
 	}
 
 	return newUser, nil
 }
 
-func (s *authService) Login(ctx context.Context, email, password string) (string, string, *model.User, error) {
-	user, err := s.authRepo.FindUserByEmail(ctx, email)
+func (s *authService) Login(ctx context.Context, identifier, password, ipAddress, userAgent string) (string, string, *model.User, error) {
+	user, err := s.authRepo.FindUserByIdentifier(ctx, identifier)
 	if err != nil {
-		return "", "", nil, ErrInvalidCredentials
+		s.activityService.LogActivity(ctx, nil, model.ActivityLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, nil)
+		return "", "", nil, apperrors.ErrInvalidCredentials
 	}
 
 	if user.Password == nil {
-		return "", "", nil, ErrInvalidCredentials
+		s.activityService.LogActivity(ctx, &user.ID, model.ActivityLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, nil)
+		return "", "", nil, apperrors.ErrInvalidCredentials
 	}
 
 	if compareErr := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(password)); compareErr != nil {
-		return "", "", nil, ErrInvalidCredentials
+		s.activityService.LogActivity(ctx, &user.ID, model.ActivityLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, nil)
+		return "", "", nil, apperrors.ErrInvalidCredentials
 	}
 
-	// Generate JWT token
-	claims := jwt.MapClaims{
-		"user_id":        user.ID,
-		"username":       user.Username,
-		"email":          user.Email,
-		"is_super_admin": user.IsSuperAdmin,
-		"iat":            time.Now().Unix(),
-		"exp":            time.Now().Add(s.jwtExpiry).Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	tokenString, err := token.SignedString(s.jwtSecret)
+	tokenString, refreshToken, err := s.createTokenAndSession(ctx, user)
 	if err != nil {
 		return "", "", nil, err
 	}
 
-	// Generate secure refresh token
-	refreshBytes := make([]byte, 64)
-	if _, err := rand.Read(refreshBytes); err != nil {
-		return "", "", nil, fmt.Errorf("failed to generate refresh token: %w", err)
-	}
-	refreshToken := "pl_" + base64.RawURLEncoding.EncodeToString(refreshBytes)
+	s.activityService.LogActivity(ctx, &user.ID, model.ActivityLogin, model.StatusSuccess, ipAddress, userAgent, nil, nil)
 
-	// Persist session
-	sess := &model.Session{
-		RefreshToken: refreshToken,
-		UserID:       user.ID,
-	}
-	if err := s.sessionRepo.CreateSession(ctx, sess); err != nil {
-		return "", "", nil, fmt.Errorf("failed to create session: %w", err)
+	now := time.Now()
+	user.LastLoggedAt = &now
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		authLog.Warn("failed to update last_logged_at", "user_id", user.ID, "error", err)
 	}
 
 	return tokenString, refreshToken, user, nil
 }
 
-func (s *authService) CheckUsernameAvailability(ctx context.Context, username string) (bool, error) {
-	err := s.userRepo.CheckUserByUsername(ctx, username)
-	if err == repository.ErrUserExists {
-		return false, nil // Username is taken
-	}
+func (s *authService) ForgotPassword(ctx context.Context, email, ipAddress, userAgent string) error {
+	user, err := s.authRepo.FindUserByEmail(ctx, email)
 	if err != nil {
-		return false, err // Database error
+		// Intentionally swallow the error (including not-found) so the response
+		// never reveals whether an account exists for the given email.
+		return nil //nolint:nilerr // user-enumeration protection
 	}
-	return true, nil // Username is available
-}
 
-// ForgotPassword initiates the password reset process for a user.
-// For security, it always returns success even if the email doesn't exist.
-func (s *authService) ForgotPassword(ctx context.Context, email string) error {
-	// Generate password reset token (implementation requires email service integration)
-	_ = "pr_" + base64.RawURLEncoding.EncodeToString(generateRandomBytes(32))
+	resetBytes, err := generateRandomBytes(32)
+	if err != nil {
+		return err
+	}
+	resetToken := "pr_" + base64.RawURLEncoding.EncodeToString(resetBytes)
+	expiresAt := time.Now().Add(1 * time.Hour)
 
-	// In production: verify user exists, store token with expiry, send email
-	// Always return nil for security (don't reveal if email exists)
+	tokenEntry := &model.PasswordResetToken{
+		UserID:    user.ID,
+		Token:     tokenHash(resetToken),
+		ExpiresAt: expiresAt,
+	}
+
+	if err := s.passwordResetTokenRepo.DeleteByUserID(ctx, user.ID); err != nil {
+		// Best-effort cleanup of stale reset tokens. A failure here does not
+		// block issuing a new one, but is logged so drift is observable.
+		authLog.Warn("failed to delete previous password reset tokens", "user_id", user.ID, "error", err)
+	}
+
+	if err := s.passwordResetTokenRepo.Create(ctx, tokenEntry); err != nil {
+		return err
+	}
+
+	resetLink := buildPasswordResetLink(s.frontendConfig.ResetPasswordURL, resetToken)
+	if s.emailService != nil && s.emailService.IsConfigured() {
+		if err := s.emailService.EnqueuePasswordResetEmail(email, resetLink); err != nil {
+			errMsg := "Failed to queue email"
+			s.activityService.LogActivity(ctx, &user.ID, model.ActivityPasswordResetReq, model.StatusFailure, ipAddress, userAgent, &errMsg, nil)
+			authLog.Error("failed to queue password reset email", "error", err, "user_id", user.ID)
+			return nil
+		}
+		s.activityService.LogActivity(ctx, &user.ID, model.ActivityPasswordResetReq, model.StatusSuccess, ipAddress, userAgent, nil, map[string]any{"emailQueued": true})
+		return nil
+	}
+
+	s.activityService.LogActivity(ctx, &user.ID, model.ActivityPasswordResetReq, model.StatusSuccess, ipAddress, userAgent, nil, map[string]any{"devMode": true})
+
 	return nil
 }
 
-func (s *authService) ResetPassword(ctx context.Context, token, password string) error {
-	// In a real implementation, you'd verify the token against a stored hash
-	// and check if it has expired
-	if !isValidPasswordResetToken(token) {
-		return ErrInvalidToken
+func (s *authService) ResetPassword(ctx context.Context, token, password, ipAddress, userAgent string) error {
+	tokenEntry, err := s.passwordResetTokenRepo.FindByToken(ctx, tokenHash(token))
+	if err != nil {
+		return apperrors.ErrInvalidToken
+	}
+	if tokenEntry == nil {
+		return apperrors.ErrInvalidToken
 	}
 
-	// Extract email from token (simplified - in reality you'd decode from a JWT or look up in DB)
-	// For this implementation, we'll need to store the token mapping
-	// This is a simplified version - you'd want to implement proper token verification
+	if tokenEntry.UsedAt != nil {
+		return apperrors.ErrPasswordResetTokenUsed
+	}
 
-	// For now, let's implement a basic version that finds user by token
-	// In production, you'd have a password_reset_tokens table
-	return ErrInvalidToken // Simplified for now
+	if time.Now().After(tokenEntry.ExpiresAt) {
+		return apperrors.ErrPasswordResetTokenExpired
+	}
+
+	user, err := s.userRepo.GetByID(ctx, tokenEntry.UserID, false)
+	if err != nil {
+		return apperrors.ErrUserNotFound
+	}
+
+	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	hashedPassword := string(hashedPasswordBytes)
+
+	user.Password = &hashedPassword
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+
+	if err := s.passwordResetTokenRepo.MarkUsed(ctx, tokenEntry.ID); err != nil {
+		// The password was already changed; a failure to mark the token used is
+		// logged so a potentially reusable token is observable. Sessions are
+		// still invalidated below.
+		authLog.Warn("failed to mark password reset token as used", "token_id", tokenEntry.ID, "error", err)
+	}
+
+	if err := s.sessionRepo.DeleteByUserID(ctx, user.ID); err != nil {
+		authLog.Warn("failed to invalidate sessions after password reset", "user_id", user.ID, "error", err)
+	}
+
+	s.activityService.LogActivity(ctx, &user.ID, model.ActivityPasswordReset, model.StatusSuccess, ipAddress, userAgent, nil, nil)
+
+	return nil
 }
 
-func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (string, string, *model.User, error) {
-	// Verify the refresh token exists and is valid
-	session, err := s.sessionRepo.GetSessionByRefreshToken(ctx, refreshToken)
+func (s *authService) RefreshToken(ctx context.Context, refreshToken, ipAddress, userAgent string) (string, string, *model.User, error) {
+	refreshTokenHash := tokenHash(refreshToken)
+	session, err := s.sessionRepo.GetSessionByRefreshToken(ctx, refreshTokenHash)
 	if err != nil {
-		return "", "", nil, ErrInvalidToken
+		return "", "", nil, apperrors.ErrInvalidToken
 	}
 
-	// Check if session has expired
 	if session.ExpiresAt != nil && time.Now().After(*session.ExpiresAt) {
-		// Clean up expired session
-		s.sessionRepo.DeleteSession(ctx, refreshToken)
-		return "", "", nil, ErrTokenExpired
+		if err := s.sessionRepo.DeleteSession(ctx, refreshTokenHash); err != nil {
+			authLog.Warn("failed to delete expired session", "user_id", session.UserID, "error", err)
+		}
+		return "", "", nil, apperrors.ErrTokenExpired
 	}
 
-	// Get user information
-	user, err := s.userRepo.GetByID(ctx, session.UserID)
+	user, err := s.userRepo.GetByID(ctx, session.UserID, false)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to get user for token refresh: %w", err)
+		return "", "", nil, err
 	}
 
-	// Generate new JWT token
+	tokenString, err := s.createAccessToken(user)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	s.activityService.LogActivity(ctx, &user.ID, model.ActivityTokenRefresh, model.StatusSuccess, ipAddress, userAgent, nil, nil)
+
+	// The refresh token itself is not rotated: the same session/refresh token
+	// keeps being reused until it expires, at which point the user must log in
+	// again to obtain a new one.
+	return tokenString, refreshToken, user, nil
+}
+
+func (s *authService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword, ipAddress, userAgent string) error {
+	user, err := s.userRepo.GetByID(ctx, userID, false)
+	if err != nil {
+		return apperrors.ErrUserNotFound
+	}
+
+	if user.Password == nil {
+		return apperrors.ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(currentPassword)); err != nil {
+		s.activityService.LogActivity(ctx, &userID, model.ActivityPasswordChange, model.StatusFailure, ipAddress, userAgent, nil, nil)
+		return apperrors.ErrInvalidCredentials
+	}
+
+	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	hashedPassword := string(hashedPasswordBytes)
+
+	user.Password = &hashedPassword
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return err
+	}
+
+	s.activityService.LogActivity(ctx, &userID, model.ActivityPasswordChange, model.StatusSuccess, ipAddress, userAgent, nil, nil)
+
+	return nil
+}
+
+func (s *authService) Logout(ctx context.Context, refreshToken string) error {
+	return s.sessionRepo.DeleteSession(ctx, tokenHash(refreshToken))
+}
+
+func (s *authService) GetProfile(ctx context.Context, userID string) (*model.User, error) {
+	return s.userRepo.GetByID(ctx, userID, false)
+}
+
+func (s *authService) GetGithubOAuthURL(state string) string {
+	authURL, _ := url.Parse("https://github.com/login/oauth/authorize")
+	q := authURL.Query()
+	q.Set("client_id", s.githubConfig.ClientID)
+	q.Set("redirect_uri", s.githubConfig.RedirectURI)
+	q.Set("scope", "user:email")
+	q.Set("state", state)
+	authURL.RawQuery = q.Encode()
+	return authURL.String()
+}
+
+func (s *authService) GetGithubToken(ctx context.Context, code string) (string, error) {
+	data := url.Values{}
+	data.Set("client_id", s.githubConfig.ClientID)
+	data.Set("client_secret", s.githubConfig.ClientSecret)
+	data.Set("code", code)
+	data.Set("redirect_uri", s.githubConfig.RedirectURI)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to build token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to exchange code for token: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token response: %w", err)
+	}
+
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	accessToken := values.Get("access_token")
+	if accessToken == "" {
+		return "", errors.New("no access_token in GitHub response")
+	}
+
+	return accessToken, nil
+}
+
+func (s *authService) SignInWithGithub(ctx context.Context, githubUser *GithubUser, ipAddress, userAgent string) (string, string, *model.User, error) {
+	var user *model.User
+
+	githubID := githubUser.ID
+	user, err := s.authRepo.FindUserByGithubID(ctx, githubID)
+	if err != nil && !errors.Is(err, apperrors.ErrUserNotFound) {
+		s.activityService.LogActivity(ctx, nil, model.ActivityOAuthLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, map[string]any{"provider": "github"})
+		return "", "", nil, err
+	}
+
+	if user == nil || errors.Is(err, apperrors.ErrUserNotFound) {
+		email := ""
+		if githubUser.Email != nil {
+			email = *githubUser.Email
+		} else {
+			email = fmt.Sprintf("%d@github.placeholder", githubUser.ID)
+		}
+
+		username := githubUser.Login
+		newUser := &model.User{
+			Email:    email,
+			Username: &username,
+			GithubID: &githubID,
+			Image:    &githubUser.AvatarURL,
+		}
+
+		if err := s.authRepo.CreateUser(ctx, newUser); err != nil {
+			s.activityService.LogActivity(ctx, nil, model.ActivityOAuthLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, map[string]any{"provider": "github", "error": err.Error()})
+			return "", "", nil, err
+		}
+		user = newUser
+	}
+
+	tokenString, refreshToken, err := s.createTokenAndSession(ctx, user)
+	if err != nil {
+		s.activityService.LogActivity(ctx, &user.ID, model.ActivityOAuthLoginFailed, model.StatusFailure, ipAddress, userAgent, nil, map[string]any{"provider": "github"})
+		return "", "", nil, err
+	}
+
+	s.activityService.LogActivity(ctx, &user.ID, model.ActivityOAuthLogin, model.StatusSuccess, ipAddress, userAgent, nil, map[string]any{"provider": "github"})
+
+	now := time.Now()
+	user.LastLoggedAt = &now
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		authLog.Warn("failed to update last_logged_at", "user_id", user.ID, "error", err)
+	}
+
+	return tokenString, refreshToken, user, nil
+}
+
+func (s *authService) CreateOAuthExchangeCode(ctx context.Context, accessToken, refreshToken string, user *model.User) (string, error) {
+	if user == nil {
+		return "", errors.New("oauth exchange user is nil")
+	}
+
+	codeBytes, err := generateRandomBytes(32)
+	if err != nil {
+		return "", err
+	}
+	code := "oc_" + base64.RawURLEncoding.EncodeToString(codeBytes)
+	entry := oauthExchangeEntry{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		User:         user,
+		ExpiresAt:    time.Now().Add(oauthExchangeTTL),
+	}
+
+	if s.oauthExchangeCache != nil {
+		key := s.oauthExchangeCache.BuildKey("oauth_exchange", code)
+		if err := s.oauthExchangeCache.SetJSONWithTTL(ctx, key, entry, oauthExchangeTTL); err != nil {
+			return "", err
+		}
+		return code, nil
+	}
+
+	s.oauthExchangeMu.Lock()
+	defer s.oauthExchangeMu.Unlock()
+	s.cleanupExpiredOAuthExchangeCodesLocked(time.Now())
+	s.oauthExchangeCodes[code] = entry
+
+	return code, nil
+}
+
+func (s *authService) ExchangeOAuthCode(ctx context.Context, code string) (string, string, *model.User, error) {
+	if s.oauthExchangeCache != nil {
+		key := s.oauthExchangeCache.BuildKey("oauth_exchange", code)
+		var entry oauthExchangeEntry
+		found, err := s.oauthExchangeCache.GetJSONAndDelete(ctx, key, &entry)
+		if err != nil {
+			return "", "", nil, err
+		}
+		if !found || time.Now().After(entry.ExpiresAt) || entry.User == nil {
+			return "", "", nil, apperrors.ErrInvalidToken
+		}
+		return entry.AccessToken, entry.RefreshToken, entry.User, nil
+	}
+
+	s.oauthExchangeMu.Lock()
+	defer s.oauthExchangeMu.Unlock()
+
+	now := time.Now()
+	s.cleanupExpiredOAuthExchangeCodesLocked(now)
+
+	entry, ok := s.oauthExchangeCodes[code]
+	if !ok || now.After(entry.ExpiresAt) {
+		delete(s.oauthExchangeCodes, code)
+		return "", "", nil, apperrors.ErrInvalidToken
+	}
+
+	delete(s.oauthExchangeCodes, code)
+	return entry.AccessToken, entry.RefreshToken, entry.User, nil
+}
+
+func (s *authService) cleanupExpiredOAuthExchangeCodesLocked(now time.Time) {
+	for code, entry := range s.oauthExchangeCodes {
+		if now.After(entry.ExpiresAt) {
+			delete(s.oauthExchangeCodes, code)
+		}
+	}
+}
+
+func (s *authService) createAccessToken(user *model.User) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":        user.ID,
 		"username":       user.Username,
@@ -208,67 +531,58 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (st
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	tokenString, err := token.SignedString(s.jwtSecret)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to sign token: %w", err)
-	}
-
-	// Generate new refresh token and update session
-	newRefreshBytes := make([]byte, 64)
-	if _, err := rand.Read(newRefreshBytes); err != nil {
-		return "", "", nil, fmt.Errorf("failed to generate new refresh token: %w", err)
-	}
-	newRefreshToken := "pl_" + base64.RawURLEncoding.EncodeToString(newRefreshBytes)
-
-	// Update session with new refresh token
-	session.RefreshToken = newRefreshToken
-	session.CreatedAt = &time.Time{}
-	if err := s.sessionRepo.UpdateSession(ctx, session); err != nil {
-		return "", "", nil, fmt.Errorf("failed to update session: %w", err)
-	}
-
-	return tokenString, newRefreshToken, user, nil
+	return token.SignedString(s.jwtSecret)
 }
 
-func (s *authService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
-	user, err := s.userRepo.GetByID(ctx, userID)
+func (s *authService) createTokenAndSession(ctx context.Context, user *model.User) (string, string, error) {
+	tokenString, err := s.createAccessToken(user)
 	if err != nil {
-		return ErrUserNotFound
+		return "", "", err
 	}
 
-	if user.Password == nil {
-		return ErrInvalidCredentials
+	refreshBytes := make([]byte, 64)
+	if _, err := rand.Read(refreshBytes); err != nil {
+		return "", "", err
+	}
+	refreshToken := "pl_" + base64.RawURLEncoding.EncodeToString(refreshBytes)
+
+	sess := &model.Session{
+		RefreshToken: tokenHash(refreshToken),
+		UserID:       user.ID,
+		ExpiresAt:    new(time.Now().Add(s.refreshTokenExpiry)),
+	}
+	if err := s.sessionRepo.CreateSession(ctx, sess); err != nil {
+		return "", "", err
 	}
 
-	// Verify current password
-	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(currentPassword)); err != nil {
-		return ErrInvalidCredentials
-	}
-
-	// Hash new password
-	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to hash new password: %w", err)
-	}
-	hashedPassword := string(hashedPasswordBytes)
-
-	// Update password
-	user.Password = &hashedPassword
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return fmt.Errorf("failed to update user password: %w", err)
-	}
-	return nil
+	return tokenString, refreshToken, nil
 }
 
-// Helper functions
-func generateRandomBytes(n int) []byte {
+func generateRandomBytes(n int) ([]byte, error) {
 	b := make([]byte, n)
-	rand.Read(b)
-	return b
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
-func isValidPasswordResetToken(token string) bool {
-	// In a real implementation, you'd verify this against stored tokens
-	// This is a simplified check for the format
-	return len(token) > 10 && token[:3] == "pr_"
+func tokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func buildPasswordResetLink(baseURL, token string) string {
+	if baseURL == "" {
+		baseURL = "http://localhost:3000/reset-password"
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL + "?token=" + url.QueryEscape(token)
+	}
+
+	q := parsed.Query()
+	q.Set("token", token)
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }

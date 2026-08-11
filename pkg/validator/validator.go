@@ -1,7 +1,9 @@
 package validator
 
 import (
+	"errors"
 	"fmt"
+	"html"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,15 +13,17 @@ import (
 )
 
 var messages = map[string]string{
-	"required": "%s is required",
-	"email":    "%s must be a valid email address",
-	"min":      "%s must be at least %s characters long",
-	"max":      "%s must not exceed %s characters",
-	"oneof":    "%s must be one of [%s]",
-	"password": "%s must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
-	"default":  "%s failed validation for tag %s",
+	"required":   "%s is required",
+	"email":      "%s must be a valid email address",
+	"min":        "%s must be at least %s characters long",
+	"max":        "%s must not exceed %s characters",
+	"oneof":      "%s must be one of [%s]",
+	"free_model": "%s must be a free OpenRouter model (use :free suffix or openrouter/free)",
+	"password":   "%s must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+	"default":    "%s failed validation for tag %s",
 }
 
+// CustomValidator wraps go-playground/validator with app-specific tags.
 type CustomValidator struct {
 	validator *validator.Validate
 }
@@ -44,13 +48,38 @@ func (v ValidationErrors) Error() string {
 	return v.Errors[0].Message
 }
 
+// NewValidator creates a CustomValidator with app-specific validations registered.
 func NewValidator() *CustomValidator {
 	v := validator.New()
-
-	// Register custom password validator
-	v.RegisterValidation("password", validatePassword)
-
+	_ = v.RegisterValidation("free_model", validateFreeModel)
+	_ = v.RegisterValidation("password", validatePassword)
 	return &CustomValidator{validator: v}
+}
+
+func validateFreeModel(fl validator.FieldLevel) bool {
+	switch value := fl.Field().Interface().(type) {
+	case string:
+		return value == "" || IsFreeOpenRouterModel(value)
+	case *string:
+		if value == nil || *value == "" {
+			return true
+		}
+		return IsFreeOpenRouterModel(*value)
+	default:
+		return false
+	}
+}
+
+// IsFreeOpenRouterModel reports whether model ID is an OpenRouter free-tier model.
+func IsFreeOpenRouterModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	if strings.EqualFold(model, "openrouter/free") {
+		return true
+	}
+	return strings.HasSuffix(model, ":free")
 }
 
 // validatePassword validates that password meets security requirements:
@@ -81,25 +110,32 @@ func validatePassword(fl validator.FieldLevel) bool {
 	return hasUpper && hasLower && hasNumber && hasSpecial
 }
 
-func (cv *CustomValidator) Validate(out any) error {
-	if err := cv.validator.Struct(out); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			errors := ValidationErrors{
+// Validate runs struct validation and converts errors to app ValidationErrors.
+func (cv *CustomValidator) Validate(i any) error {
+	if err := cv.validator.Struct(i); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			result := ValidationErrors{
 				Errors: make([]ValidationError, len(validationErrors)),
 			}
 			for i, e := range validationErrors {
-				errors.Errors[i] = ValidationError{
+				result.Errors[i] = ValidationError{
 					Field:   e.Field(),
 					Message: getErrorMessage(e),
 					Value:   e.Value(),
 					Tag:     e.Tag(),
 				}
 			}
-			return errors
+			return result
 		}
 		return err
 	}
 	return nil
+}
+
+// ValidateStruct is a helper function to validate any struct.
+func ValidateStruct(s any) error {
+	return NewValidator().Validate(s)
 }
 
 func getErrorMessage(e validator.FieldError) string {
@@ -115,6 +151,8 @@ func getErrorMessage(e validator.FieldError) string {
 		return fmt.Sprintf(messages["max"], fieldName, e.Param())
 	case "oneof":
 		return fmt.Sprintf(messages["oneof"], fieldName, e.Param())
+	case "free_model":
+		return fmt.Sprintf(messages["free_model"], fieldName)
 	case "password":
 		return fmt.Sprintf(messages["password"], fieldName)
 	default:
@@ -137,12 +175,11 @@ func toReadableFieldName(field string) string {
 	return result.String()
 }
 
-// IsValidUUID validates if a string is a valid UUID v7 format
+// IsValidUUID validates if a string is a valid UUID (v4/v7) format
 func IsValidUUID(uuid string) bool {
 	if uuid == "" {
 		return false
 	}
-	// UUID v7 pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 	pattern := `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
 	matched, _ := regexp.MatchString(pattern, uuid)
 	return matched
@@ -151,13 +188,13 @@ func IsValidUUID(uuid string) bool {
 // ValidatePagination validates pagination parameters
 func ValidatePagination(limit, offset int) error {
 	if limit <= 0 {
-		return fmt.Errorf("limit must be greater than 0")
+		return errors.New("limit must be greater than 0")
 	}
 	if limit > 100 {
-		return fmt.Errorf("limit must not exceed 100")
+		return errors.New("limit must not exceed 100")
 	}
 	if offset < 0 {
-		return fmt.Errorf("offset must be non-negative")
+		return errors.New("offset must be non-negative")
 	}
 	return nil
 }
@@ -165,10 +202,10 @@ func ValidatePagination(limit, offset int) error {
 // ValidatePostLikeInput validates input for post like operations
 func ValidatePostLikeInput(postID, userID string) error {
 	if !IsValidUUID(postID) {
-		return fmt.Errorf("invalid post ID format")
+		return errors.New("invalid post ID format")
 	}
 	if !IsValidUUID(userID) {
-		return fmt.Errorf("invalid user ID format")
+		return errors.New("invalid user ID format")
 	}
 	return nil
 }
@@ -200,36 +237,9 @@ func ValidatePaginationWithDefaults(limitParam, offsetParam string) (int, int, e
 	return limit, offset, nil
 }
 
-// SanitizeString removes potentially dangerous characters from input
+// SanitizeString escapes HTML special characters to prevent XSS attacks.
+// This converts <, >, &, ', and " to their HTML entity equivalents.
 func SanitizeString(input string) string {
-	// Remove potentially dangerous characters
-	re := regexp.MustCompile(`<script[^>]*>.*?</script>`)
-	sanitized := re.ReplaceAllString(input, "")
-
-	// Additional sanitization as needed
-	sanitized = strings.TrimSpace(sanitized)
-	return sanitized
-}
-
-// ValidateStruct is a helper function to validate any struct
-func ValidateStruct(s any) error {
-	v := validator.New()
-	if err := v.Struct(s); err != nil {
-		if validationErrors, ok := err.(validator.ValidationErrors); ok {
-			errors := ValidationErrors{
-				Errors: make([]ValidationError, len(validationErrors)),
-			}
-			for i, e := range validationErrors {
-				errors.Errors[i] = ValidationError{
-					Field:   e.Field(),
-					Message: getErrorMessage(e),
-					Value:   e.Value(),
-					Tag:     e.Tag(),
-				}
-			}
-			return errors
-		}
-		return err
-	}
-	return nil
+	escaped := html.EscapeString(input)
+	return strings.TrimSpace(escaped)
 }

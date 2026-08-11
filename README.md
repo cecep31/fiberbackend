@@ -1,139 +1,110 @@
 # Fiber Backend API
 
-A modern REST API for a blog/content management system built with Go, Fiber framework, and PostgreSQL. Features include user management, posts, comments, chat functionality, and more.
+A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL. Feature-for-feature twin of `echobackend` (same API contract, Echo v5 in that repo) — only the HTTP layer differs.
 
-## Features
+## Core Features
 
-- **User Management**: Complete user system with authentication, profiles, and following
-- **Content Management**: Posts with rich text, images, tags, and versioning
-- **Social Features**: User follows, post likes, comments, and bookmarks
-- **Real-time Chat**: Conversational AI with message history and token tracking
-- **Analytics**: Post view tracking and statistics
-- **Security**: JWT authentication, rate limiting, and input validation
-- **Performance**: Database connection pooling, caching, and optimized queries
-- **Deployment**: Docker support with multi-stage builds
-- **Monitoring**: Comprehensive logging and metrics
+- **User Management**: Auth (JWT + DB-backed refresh sessions), GitHub OAuth, password reset (SMTP/queue), activity logs, profiles, following.
+- **Content Management**: Posts with rich text, tags, comments, bookmarks (+ folders), post views, likes, sitemap & trending.
+- **Analytics**: Post analytics + likes-by-month, admin reports (overview/user/post/engagement), holdings dashboards.
+- **Real-time Chat**: Conversational AI via OpenRouter with SSE streaming and message history.
+- **Finance Tools**: Holdings with live price sync (Yahoo), monthly compare/trends, IDX corporate-action calendar, exchange rates.
+- **Security**: JWT auth (DB-checked admin), per-endpoint rate limiting, input validation (422), helmet security headers, no error leakage.
+- **Performance**: Valkey/Redis caching, connection pooling, GORM slow-query logging.
+- **Infra**: Goose migrations, Docker (multi-stage, non-root, HEALTHCHECK), Docker Compose local services, GitHub Actions CI, Fly.io deploy.
+
+## Tech Stack
+
+- **Runtime**: Go 1.26
+- **Web Framework**: [Fiber v3](https://github.com/gofiber/fiber)
+- **ORM**: [GORM](https://gorm.io/) v2
+- **Database**: PostgreSQL 18+
+- **Cache**: Valkey/Redis (optional)
+- **Storage**: MinIO / AWS S3 (optional)
+- **Queue/Email**: Asynq + SMTP (optional)
+- **Migrations**: [Goose](https://github.com/pressly/goose) (Raw SQL)
 
 ## Quick Start
 
-### Prerequisites
-- Go 1.25+
-- PostgreSQL 14+
-- Docker (optional, for containerized deployment)
-
-### Setup
-
-1. **Clone and setup:**
-   ```bash
-   git clone <your-repo-url>
-   cd fiberbackend
-   cp .env.example .env
-   ```
-
-2. **Configure environment:**
-   Edit `.env` file with your configuration:
-   ```env
-   # Server
-   PORT=8080
-   
-   # Database
-   DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-   MAX_OPEN_CONNS=30
-   MAX_IDLE_CONNS=2
-   CONN_MAX_LIFETIME=30m
-   
-   # Authentication
-   JWT_SECRET=your-secret-key
-
-   # Rate Limiting
-   RATE_LIMITER_MAX=0
-   RATE_LIMITER_TTL=60
-
-   # Debug
-   DEBUG=false
-   ```
-
-3. **Run:**
-   ```bash
-   # Install dependencies
-   go mod download
-   
-   # Run migrations (if using migration tool)
-   # psql -d your_database_name -f migrations/*.sql
-   
-   # Start the server
-   go run cmd/main.go
-   ```
-
-   Server starts at `http://localhost:8080`
-
-### Development
-
 ```bash
-# Build and run
-make build
-make dev
+# 1. Setup environment
+cp .env.example .env       # set JWT_SECRET (>= 32 chars)
 
-# Code quality
-make fmt
-make vet
-make lint
+# 2. Start local services (Postgres 18, Valkey, MinIO)
+docker compose up -d --wait
+
+# 3. Apply database migrations
+goose up
+
+# 4. Run with hot reload (requires air)
+air
+
+# 5. Or run normally
+go run cmd/main.go
 ```
 
-### Docker
+The server starts at `http://localhost:8080` (health check at `/health`). A `Makefile` wraps common tasks (`make help`); on Windows use Git Bash/WSL or run the underlying commands directly.
 
-```bash
-# Build and run
-docker build -t fiberbackend .
-docker run -p 8080:8080 fiberbackend
-```
+## Environment Variables
+
+The application requires the following mandatory environment variables to start:
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (DSN) |
+| `JWT_SECRET` | Secret key for JWT signing & verification (≥ 32 chars) |
+
+All other configurations (S3, Valkey, SMTP, Asynq, GitHub OAuth, OpenRouter, market data, rate limiting, CORS) are optional and documented in [`.env.example`](.env.example). Many keys accept legacy fallback aliases (first-set wins).
+
+## Architecture
+
+Modular layered architecture with manual dependency injection:
+
+- **`internal/di/`**: Centralized DI container (`container.go`).
+- **`internal/handler/`**: Request handling and response formatting via `pkg/response`.
+- **`internal/service/`**: Core business logic and service orchestration.
+- **`internal/repository/`**: Data access layer using GORM.
+- **`internal/model/`**: GORM entities and shared domain models.
+- **`internal/dto/`**: Request/response structs and converters.
+- **`internal/apperror/`**: Shared application error sentinels.
+- **`internal/platform/`**: App-owned infrastructure adapters (cache, database, email, queue, storage).
+- **`pkg/`**: Reusable helper packages (applog, market, response, validator).
 
 ## API Documentation
 
-For detailed API endpoints and examples, see [api_doc.md](api_doc.md).
+Full HTTP API reference lives in [`docs/api/README.md`](docs/api/README.md), with per-module docs for auth, users, posts, tags, chat, holdings, exchange rates, bookmarks, notifications, and admin reports.
 
-## Project Structure
+### Standardized Responses
 
-```
-├── cmd/                    # Application entry point
-├── config/                 # Configuration management
-├── internal/               # Private application code
-│   ├── handler/            # HTTP handlers
-│   ├── service/            # Business logic
-│   ├── repository/         # Data access
-│   ├── model/              # Database models
-│   ├── middleware/         # HTTP middleware
-│   └── routes/             # Route definitions
-├── migrations/             # Database migrations
-└── pkg/                    # Shared utilities
+All handlers use `pkg/response` helpers to ensure a consistent API contract:
+```go
+return response.Success(c, "Data retrieved", data)
+return response.ValidationError(c, "Invalid input", err)
 ```
 
-This project follows a clean architecture pattern with separation of concerns between handlers, services, repositories, and models.
+## Database Migrations
 
-## Contributing
+Managed via [goose](https://github.com/pressly/goose). Configuration is automatically picked up from `.env`.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit changes: `git commit -am 'Add feature'`
-4. Push to branch: `git push origin feature/my-feature`
-5. Submit a pull request
+```bash
+goose up        # Apply all pending migrations
+goose down      # Rollback the last migration
+goose status    # Check migration history
+goose create <migration_name> sql
+```
 
-Please follow existing code style.
+## Deployment
+
+CI via GitHub Actions on push to `main`: test/lint → Docker build/push (`cecep31/fiberbackend:latest`, `sha-*` tags) → Fly.io deploy. Pull a pinned `sha-*` image for reproducible deploys.
+
+```bash
+# Local Docker build test
+docker build -t cecep31/fiberbackend .
+
+# Run container locally
+docker run -p 8080:8080 --env-file .env cecep31/fiberbackend
+```
 
 ## License
 
-MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-repo/fiberbackend/issues)
-- **Documentation**: [API Documentation](api_doc.md)
-
-## Technologies
-
-- **Go**: 1.25+
-- **Fiber Framework**: v3.0.0
-- **GORM**: v1.31.1
-- **PostgreSQL**: 14+
-- **JWT Authentication**: github.com/golang-jwt/jwt/v5
-- **Docker**: Containerization support
+MIT

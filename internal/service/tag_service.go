@@ -2,73 +2,128 @@ package service
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"time"
 
+	apperrors "fiberbackend/internal/apperror"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/repository"
 )
 
+const (
+	trendingTagsLimit = 5
+	trendingTagsTTL   = 30 * time.Minute
+)
+
+type tagCache interface {
+	BuildKey(parts ...string) string
+	GetJSON(ctx context.Context, key string, dest any) (bool, error)
+	SetJSONWithTTL(ctx context.Context, key string, value any, ttl time.Duration) error
+}
+
 type tagService struct {
 	tagRepo repository.TagRepository
+	cache   tagCache
 }
 
 type TagService interface {
-	CreateTag(ctx context.Context, tag *model.Tag) error
-	GetTags(ctx context.Context, offset, limit int) ([]model.Tag, int64, error)
+	CreateTag(ctx context.Context, req *dto.CreateTagRequest) (*model.Tag, error)
+	GetTags(ctx context.Context) ([]model.Tag, error)
 	GetTagByID(ctx context.Context, id uint) (*model.Tag, error)
 	GetTagByName(ctx context.Context, name string) (*model.Tag, error)
+	GetTrendingTags(ctx context.Context) ([]*dto.TrendingTagResponse, error)
+	GetTagsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapTag, error)
 	FindOrCreateByName(ctx context.Context, name string) (*model.Tag, error)
-	UpdateTag(ctx context.Context, tag *model.Tag) error
+	UpdateTag(ctx context.Context, id uint, req *dto.UpdateTagRequest) (*model.Tag, error)
 	DeleteTag(ctx context.Context, id uint) error
 }
 
-func NewTagService(tagRepo repository.TagRepository) TagService {
-	return &tagService{tagRepo: tagRepo}
-}
-
-func (s *tagService) CreateTag(ctx context.Context, tag *model.Tag) error {
-	if tag.Name == nil || *tag.Name == "" {
-		return errors.New("tag name is required")
+func NewTagService(tagRepo repository.TagRepository, cache ...tagCache) TagService {
+	var c tagCache
+	if len(cache) > 0 {
+		c = cache[0]
 	}
-	return s.tagRepo.Create(ctx, tag)
+	return &tagService{tagRepo: tagRepo, cache: c}
 }
 
-func (s *tagService) GetTags(ctx context.Context, offset, limit int) ([]model.Tag, int64, error) {
-	return s.tagRepo.FindAll(ctx, offset, limit)
+func (s *tagService) CreateTag(ctx context.Context, req *dto.CreateTagRequest) (*model.Tag, error) {
+	if req.Name == "" {
+		return nil, apperrors.ErrTagNameRequired
+	}
+	tag := &model.Tag{Name: req.Name}
+	if err := s.tagRepo.Create(ctx, tag); err != nil {
+		return nil, err
+	}
+	return tag, nil
+}
+
+func (s *tagService) GetTags(ctx context.Context) ([]model.Tag, error) {
+	return s.tagRepo.FindAll(ctx)
 }
 
 func (s *tagService) GetTagByID(ctx context.Context, id uint) (*model.Tag, error) {
 	return s.tagRepo.FindByID(ctx, id)
 }
 
-func (s *tagService) UpdateTag(ctx context.Context, tag *model.Tag) error {
-	return s.tagRepo.Update(ctx, tag)
+func (s *tagService) UpdateTag(ctx context.Context, id uint, req *dto.UpdateTagRequest) (*model.Tag, error) {
+	if req.Name == "" {
+		return nil, apperrors.ErrTagNameRequired
+	}
+	tag := &model.Tag{ID: int(id), Name: req.Name}
+	if err := s.tagRepo.Update(ctx, tag); err != nil {
+		return nil, err
+	}
+	return tag, nil
 }
 
 func (s *tagService) GetTagByName(ctx context.Context, name string) (*model.Tag, error) {
 	return s.tagRepo.FindByName(ctx, name)
 }
 
-func (s *tagService) FindOrCreateByName(ctx context.Context, name string) (*model.Tag, error) {
-	if name == "" {
-		return nil, errors.New("tag name cannot be empty")
+func (s *tagService) GetTrendingTags(ctx context.Context) ([]*dto.TrendingTagResponse, error) {
+	cacheKey := ""
+	if s.cache != nil {
+		cacheKey = s.cache.BuildKey("tags", "trending")
+		var cachedTags []*dto.TrendingTagResponse
+		found, err := s.cache.GetJSON(ctx, cacheKey, &cachedTags)
+		if err == nil && found {
+			return cachedTags, nil
+		}
 	}
 
-	// Try to find existing tag
+	tags, err := s.tagRepo.GetTrendingTags(ctx, trendingTagsLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	if cacheKey != "" {
+		_ = s.cache.SetJSONWithTTL(ctx, cacheKey, tags, trendingTagsTTL)
+	}
+
+	return tags, nil
+}
+
+func (s *tagService) GetTagsForSitemap(ctx context.Context, limit int) ([]*dto.SitemapTag, error) {
+	return s.tagRepo.GetTagsForSitemap(ctx, limit)
+}
+
+func (s *tagService) FindOrCreateByName(ctx context.Context, name string) (*model.Tag, error) {
+	if name == "" {
+		return nil, apperrors.ErrTagNameEmpty
+	}
+
 	tag, err := s.tagRepo.FindByName(ctx, name)
 	if err == nil {
 		return tag, nil
 	}
 
-	// If tag doesn't exist, create a new one
 	newTag := &model.Tag{
-		Name: &name,
+		Name: name,
 	}
 
 	err = s.tagRepo.Create(ctx, newTag)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create tag: %w", err)
+		return nil, err
 	}
 
 	return newTag, nil
@@ -77,10 +132,7 @@ func (s *tagService) FindOrCreateByName(ctx context.Context, name string) (*mode
 func (s *tagService) DeleteTag(ctx context.Context, id uint) error {
 	_, err := s.tagRepo.FindByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("failed to find tag for deletion: %w", err)
+		return err
 	}
-	if err := s.tagRepo.Delete(ctx, id); err != nil {
-		return fmt.Errorf("failed to delete tag: %w", err)
-	}
-	return nil
+	return s.tagRepo.Delete(ctx, id)
 }

@@ -1,12 +1,9 @@
 package handler
 
 import (
-	"strconv"
-
-	"fiberbackend/internal/model"
+	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
-	"fiberbackend/pkg/utils"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,21 +16,22 @@ func NewUserFollowHandler(userFollowService service.UserFollowService) *UserFoll
 	return &UserFollowHandler{userFollowService: userFollowService}
 }
 
-// FollowUser follows a user
 func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
-	currentUserID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "Authentication required")
 	}
 
-	// Get user ID to follow from request body
-	var followReq model.FollowRequest
+	var followReq dto.FollowRequest
 	if err := c.Bind().Body(&followReq); err != nil {
-		return response.HandleBindError(c, err)
+		return response.BadRequest(c, "Invalid request body", err)
 	}
 
-	// Follow the user
-	followResponse, err := h.userFollowService.FollowUser(c.Context(), currentUserID, followReq.UserID)
+	if err := bindValidate(c, &followReq); err != nil {
+		return err
+	}
+
+	followResponse, err := h.userFollowService.FollowUser(c.Context(), userID, followReq.UserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to follow user", err)
 	}
@@ -41,21 +39,18 @@ func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
 	return response.Success(c, followResponse.Message, followResponse)
 }
 
-// UnfollowUser unfollows a user
 func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
-	currentUserID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "Authentication required")
 	}
 
-	// Get user ID to unfollow from URL parameter
 	userIDToUnfollow := c.Params("id")
 	if userIDToUnfollow == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Unfollow the user
-	followResponse, err := h.userFollowService.UnfollowUser(c.Context(), currentUserID, userIDToUnfollow)
+	followResponse, err := h.userFollowService.UnfollowUser(c.Context(), userID, userIDToUnfollow)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to unfollow user", err)
 	}
@@ -63,80 +58,48 @@ func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
 	return response.Success(c, followResponse.Message, followResponse)
 }
 
-// GetFollowers gets followers of a user
 func (h *UserFollowHandler) GetFollowers(c fiber.Ctx) error {
 	userID := c.Params("id")
 	if userID == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Parse pagination parameters
-	limit, err := strconv.Atoi(c.Query("limit"))
-	if err != nil || limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100 // Max limit
-	}
+	limit, offset := ParsePaginationParams(c, 10)
 
-	offset, err := strconv.Atoi(c.Query("offset"))
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-
-	// Get followers
 	followers, total, err := h.userFollowService.GetFollowers(c.Context(), userID, limit, offset)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get followers", err)
 	}
 
-	// Calculate pagination meta
 	meta := response.CalculatePaginationMeta(total, offset, limit)
 
 	return response.SuccessWithMeta(c, "Successfully retrieved followers", followers, meta)
 }
 
-// GetFollowing gets users that a user is following
 func (h *UserFollowHandler) GetFollowing(c fiber.Ctx) error {
 	userID := c.Params("id")
 	if userID == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Parse pagination parameters
-	limit, err := strconv.Atoi(c.Query("limit"))
-	if err != nil || limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100 // Max limit
-	}
+	limit, offset := ParsePaginationParams(c, 10)
 
-	offset, err := strconv.Atoi(c.Query("offset"))
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-
-	// Get following
 	following, total, err := h.userFollowService.GetFollowing(c.Context(), userID, limit, offset)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get following", err)
 	}
 
-	// Calculate pagination meta
 	meta := response.CalculatePaginationMeta(total, offset, limit)
 
 	return response.SuccessWithMeta(c, "Successfully retrieved following", following, meta)
 }
 
-// GetFollowStats gets follow statistics for a user
 func (h *UserFollowHandler) GetFollowStats(c fiber.Ctx) error {
 	userID := c.Params("id")
 	if userID == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Get follow statistics
 	stats, err := h.userFollowService.GetFollowStats(c.Context(), userID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get follow statistics", err)
@@ -145,21 +108,18 @@ func (h *UserFollowHandler) GetFollowStats(c fiber.Ctx) error {
 	return response.Success(c, "Successfully retrieved follow statistics", stats)
 }
 
-// CheckFollowStatus checks if current user is following a specific user
 func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
-	currentUserID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "Authentication required")
 	}
 
-	// Get target user ID
 	targetUserID := c.Params("id")
 	if targetUserID == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Check follow status
-	isFollowing, err := h.userFollowService.IsFollowing(c.Context(), currentUserID, targetUserID)
+	isFollowing, err := h.userFollowService.IsFollowing(c.Context(), userID, targetUserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to check follow status", err)
 	}
@@ -169,21 +129,18 @@ func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
 	})
 }
 
-// GetMutualFollows gets mutual follows between current user and another user
 func (h *UserFollowHandler) GetMutualFollows(c fiber.Ctx) error {
-	currentUserID, err := utils.RequireUserID(c)
-	if err != nil {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
 		return response.Unauthorized(c, "Authentication required")
 	}
 
-	// Get other user ID
 	otherUserID := c.Params("id")
 	if otherUserID == "" {
 		return response.BadRequest(c, "User ID is required", nil)
 	}
 
-	// Get mutual follows
-	mutualFollows, err := h.userFollowService.GetMutualFollows(c.Context(), currentUserID, otherUserID)
+	mutualFollows, err := h.userFollowService.GetMutualFollows(c.Context(), userID, otherUserID)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get mutual follows", err)
 	}

@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"fiberbackend/internal/model"
 
@@ -13,9 +12,8 @@ import (
 type SessionRepository interface {
 	CreateSession(ctx context.Context, s *model.Session) error
 	GetSessionByRefreshToken(ctx context.Context, token string) (*model.Session, error)
-	GetByRefreshToken(ctx context.Context, token string) (*model.Session, error)
 	DeleteSession(ctx context.Context, token string) error
-	DeleteByRefreshToken(ctx context.Context, token string) error
+	DeleteByUserID(ctx context.Context, userID string) error
 	UpdateSession(ctx context.Context, s *model.Session) error
 }
 
@@ -31,18 +29,10 @@ func (r *sessionRepository) CreateSession(ctx context.Context, s *model.Session)
 	return r.db.WithContext(ctx).Create(s).Error
 }
 
-func (r *sessionRepository) GetByRefreshToken(ctx context.Context, token string) (*model.Session, error) {
-	var sess model.Session
-	if err := r.db.WithContext(ctx).Where("refresh_token = ?", token).First(&sess).Error; err != nil {
-		return nil, fmt.Errorf("failed to get session by refresh token: %w", err)
-	}
-	return &sess, nil
-}
-
 func (r *sessionRepository) GetSessionByRefreshToken(ctx context.Context, token string) (*model.Session, error) {
 	var sess model.Session
 	if err := r.db.WithContext(ctx).Where("refresh_token = ?", token).First(&sess).Error; err != nil {
-		return nil, fmt.Errorf("failed to get session by refresh token: %w", err)
+		return nil, err
 	}
 	return &sess, nil
 }
@@ -51,8 +41,8 @@ func (r *sessionRepository) DeleteSession(ctx context.Context, token string) err
 	return r.db.WithContext(ctx).Where("refresh_token = ?", token).Delete(&model.Session{}).Error
 }
 
-func (r *sessionRepository) DeleteByRefreshToken(ctx context.Context, token string) error {
-	return r.db.WithContext(ctx).Where("refresh_token = ?", token).Delete(&model.Session{}).Error
+func (r *sessionRepository) DeleteByUserID(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.Session{}).Error
 }
 
 func (r *sessionRepository) UpdateSession(ctx context.Context, s *model.Session) error {

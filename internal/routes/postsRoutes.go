@@ -1,34 +1,39 @@
 package routes
 
 import (
-	"time"
-
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/limiter"
 )
 
-func (r *Routes) setupPostRoutes(v1 fiber.Router) {
-	posts := v1.Group("/posts")
-	sitemapLimiter := limiter.New(limiter.Config{
-		Max:        30,
-		Expiration: 1 * time.Minute,
-	})
+// imageBodyLimit is a per-route body pre-check for the 1MB image upload endpoint.
+func imageBodyLimit(c fiber.Ctx) error {
+	if c.Request().Header.ContentLength() > 1*1024*1024 {
+		return fiber.ErrRequestEntityTooLarge
+	}
+	return c.Next()
+}
+
+func (r *Routes) setupPostRoutes(api fiber.Router) {
+	posts := api.Group("/posts")
 	{
-		// Static routes must come BEFORE parameterized routes
 		posts.Post("", r.authMiddleware.Auth(), r.postHandler.CreatePost)
-		posts.Get("", r.postHandler.GetPosts)
-		posts.Get("/trending", r.postHandler.GetPostsTrending)
 		posts.Get("/random", r.postHandler.GetPostsRandom)
-		posts.Get("/mine", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
-		posts.Get("/author/:username", r.postHandler.GetPostsByUsername)
+		posts.Get("/trending", r.postHandler.GetPostsTrending)
+		posts.Get("/me", r.authMiddleware.Auth(), r.postHandler.GetMyPosts)
+		posts.Get("/me/analytics", r.authMiddleware.Auth(), r.postHandler.GetMyPostsAnalytics)
+		posts.Get("/me/analytics/likes-by-month", r.authMiddleware.Auth(), r.postHandler.GetMyPostsLikesByMonth)
+		posts.Get("/me/:id", r.authMiddleware.Auth(), r.postHandler.GetMyPost)
+		posts.Put("/me/:id", r.authMiddleware.Auth(), r.postHandler.UpdateMyPost)
+		posts.Delete("/me/:id", r.authMiddleware.Auth(), r.postHandler.DeleteMyPost)
+		posts.Get("/feed/for-you", r.authMiddleware.Auth(), r.postHandler.GetPostsForYou)
+		posts.Post("/image", r.authMiddleware.Auth(), imageBodyLimit, r.postHandler.UploadImagePosts)
+		posts.Get("/sitemap", r.postHandler.GetPostsForSitemap)
+		posts.Get("/username/:username", r.postHandler.GetPostsByUsername)
 		posts.Get("/u/:username/:slug", r.postHandler.GetPostBySlugAndUsername)
 		posts.Get("/tag/:tag", r.postHandler.GetPostsByTag)
-		posts.Get("/sitemap", sitemapLimiter, r.postHandler.GetPostsSitemap)
-
-		// Parameterized routes must come AFTER static routes
-		posts.Get("/:id", r.postHandler.GetPost)
-		posts.Put("/:id", r.authMiddleware.Auth(), r.postHandler.UpdatePost)
-		posts.Delete("/:id", r.authMiddleware.Auth(), r.postHandler.DeletePost)
+		posts.Get("", r.postHandler.GetPosts)
+		posts.Put("/:id", r.authMiddleware.Auth(), r.authMiddleware.AuthAdmin(), r.postHandler.UpdatePost)
+		posts.Delete("/:id", r.authMiddleware.Auth(), r.authMiddleware.AuthAdmin(), r.postHandler.DeletePost)
+		posts.Get("/:id", r.authMiddleware.Auth(), r.authMiddleware.AuthAdmin(), r.postHandler.GetPost)
 
 		// Comment routes
 		posts.Get("/:id/comments", r.commentHandler.GetCommentsByPostID)

@@ -1,8 +1,7 @@
 # Environment variables
 .env
 
-# Binaries
-bin/
+# Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
@@ -23,3 +22,9 @@ go.work
 
 # Temporary files
 tmp/
+
+# Build output / coverage (see Makefile)
+bin/
+coverage/
+
+.codex
