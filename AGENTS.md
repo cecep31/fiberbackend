@@ -9,14 +9,15 @@ REST API built with Go 1.26, **Fiber v3**, PostgreSQL, and GORM. Clean architect
 docker compose up -d --wait # Start services (or: make up). Creates the `custom` schema automatically.
 docker compose down         # Stop (or: make down; make down-clean also wipes data)
 make help                   # All shortcuts: up, dev, test, lint, check, migrate-*, ...
+# Windows gets no `make` by default — use Git Bash/WSL/Chocolatey make, or run the underlying go/docker/goose commands directly.
 
 # Run
 air                              # Hot reload development (reads .env automatically)
 go run cmd/main.go              # Direct run
 
-# Lint
-golangci-lint run               # Run all linters (see .golangci.yml)
-gofmt -l .                      # Check formatting
+# Lint (golangci-lint v2 — see .golangci.yml)
+golangci-lint run ./...         # All linters + gofmt/goimports formatter checks
+golangci-lint fmt ./...         # Auto-format (gofmt + goimports); same as `make fmt`
 go vet ./...                    # Vet all packages
 
 # Test
@@ -117,8 +118,7 @@ import (
 
 ### Formatting
 
-- Use `gofmt` for formatting
-- Max line length: 140 characters (see `.golangci.yml` `lll` setting)
+- `.golangci.yml` is **v2 format**: it enables `gofmt` + `goimports` as *formatters* and `default: standard` linters plus extras (errorlint, revive, gocritic, bodyclose, nilerr, noctx, ...). `golangci-lint run ./...` catches formatting, not just lint. CI pins golangci-lint **v2.12.2**.
 - Tabs for indentation
 - No trailing whitespace
 
@@ -147,6 +147,14 @@ if err := c.Bind().Body(&req); err != nil {
 if err := bindValidate(c, &req); err != nil {
 	return err
 }
+```
+
+### Logging
+
+Use `pkg/applog` (a thin wrapper over `log/slog`) instead of bare `fmt.Println`/`log`. Define a package-level component logger and call its `.Debug/.Info/.Warn/.Error` methods:
+
+```go
+var log = applog.Component("auth") // adds "component" field; safe as a package var
 ```
 
 ## Key Files
