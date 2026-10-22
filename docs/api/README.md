@@ -1,4 +1,4 @@
-# API Documentation - echobackend
+# API Documentation - fiberbackend
 
 HTTP API reference for frontend integration. All business routes are under the `/api` prefix, except the root health check endpoints.
 
@@ -105,7 +105,10 @@ Query: `limit` (default varies by endpoint, **maximum 100** on most endpoints â€
 | Exchange rates | `/api/exchange-rates` | [exchange-rates.md](./exchange-rates.md) |
 | Bookmarks | `/api/bookmarks` | [bookmarks.md](./bookmarks.md) |
 | Notifications | `/api/notifications` | [notifications.md](./notifications.md) |
-| Reports (admin) | `/api/reports` | [reports.md](./reports.md) |
+| Guilds (channels, messages, SSE) | `/api/guilds` | [guilds.md](./guilds.md) |
+| Admin stats | `/api/posts/stats`, `/api/tags/stats`, `/api/users/stats` | [stats.md](./stats.md) |
+
+Post reporting and moderation routes live under `/api/posts` â€” see the Moderation section in [posts.md](./posts.md). The legacy `/api/reports` module was removed; use the stats endpoints instead.
 
 Debug routes (`/api/debug/pprof/*`) are registered only when `APP_DEBUG=true`; they are not intended for frontend use.
 

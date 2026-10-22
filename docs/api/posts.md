@@ -7,20 +7,20 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string (UUID) | |
-| `title` | string \| null | |
-| `photo_url` | string \| null | |
-| `body` | string \| null | Feed lists truncate this to about 250 runes + `" ..."` |
-| `slug` | string \| null | |
+| `title` | string | null | |
+| `photo_url` | string | null | |
+| `body` | string | null | Feed lists truncate this to about 250 runes + `" ..."` |
+| `slug` | string | null | |
 | `view_count` | number | |
 | `like_count` | number | |
 | `bookmark_count` | number | |
-| `published` | boolean \| null | |
-| `published_at` | string \| null | |
-| `user` | `UserBrief` \| null | Author (see below) |
+| `published` | boolean | null | |
+| `published_at` | string | null | |
+| `user` | `UserBrief` | null | Author (see below) |
 | `tags` | `TagResponse[]` | `{ id, name }` |
-| `created_at` | string \| null | |
-| `updated_at` | string \| null | |
-| `deleted_at` | string \| null | Soft delete timestamp |
+| `created_at` | string | null | |
+| `updated_at` | string | null | |
+| `deleted_at` | string | null | Soft delete timestamp |
 
 ### `TagResponse`
 
@@ -31,8 +31,8 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 | Field | Type |
 |-------|------|
 | `id` | string (UUID) |
-| `username` | string \| null |
-| `image` | string \| null |
+| `username` | string | null |
+| `image` | string | null |
 
 ---
 
@@ -253,11 +253,11 @@ Delete a post by ID. **Super admin auth required.**
 |-------|------|
 | `id` | string (UUID) |
 | `post_id` | string |
-| `parent_comment_id` | string \| null | Read-only in responses; not accepted on create |
+| `parent_comment_id` | string | null | Read-only in responses; not accepted on create |
 | `text` | string |
-| `user` | `UserBrief` \| null |
-| `created_at` | string \| null |
-| `updated_at` | string \| null |
+| `user` | `UserBrief` | null |
+| `created_at` | string | null |
+| `updated_at` | string | null |
 
 ### POST / PUT body
 
@@ -344,3 +344,31 @@ List views (internal model: `id`, `post_id`, `user_id`, `ip_address`, `user_agen
 ### GET `/api/posts/:id/liked`
 
 `data`: `{ "has_liked", "post_id", "user_id" }`.
+
+## Moderation
+
+Post reporting and admin moderation. Reports are user-facing; moderation actions require a super admin.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/posts/:id/reports` | User | Report a post (rate limited: 10 / hour / user) |
+| GET | `/api/posts/:id/reports` | Admin | List reports for a post |
+| POST | `/api/posts/:id/moderation` | Admin | Hide / unhide / dismiss a report |
+| GET | `/api/posts/:id/moderation` | Admin | Moderation action history for a post |
+| GET | `/api/posts/reports` | Admin | Reported posts (grouped, with counts) |
+
+### Report request
+
+`reason` (required): `spam` | `harassment` | `hate` | `nsfw` | `misinformation` | `other`. `details` optional (≤1000 chars).
+
+### Moderation request
+
+`action` (required): `hide` | `unhide` | `dismiss`. `note` optional (≤1000 chars). Hiding sets `hidden_at` on the post; hidden posts are excluded from public listings.
+
+### Reported post (`GET /api/posts/reports` item)
+
+`post_id`, `post_title`, `post_slug`, `author_username`, `hidden_at`, `report_count`, `top_reason`, `last_reported_at`.
+
+### Moderation action
+
+`id`, `post_id`, `action`, `note`, `created_at`, `admin` (`UserBrief`).

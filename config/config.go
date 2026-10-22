@@ -17,11 +17,11 @@
 package config
 
 import (
+	"bufio"
 	"errors"
+	"os"
 	"strings"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 // Config is the root application configuration.
@@ -69,8 +69,19 @@ type AuthConfig struct {
 	JWTSecret string
 	// JWTExpiry is the duration for which JWT access tokens remain valid.
 	JWTExpiry time.Duration
-	// RefreshTokenExpiry is the duration for which refresh tokens remain valid.
+	// RefreshTokenExpiry is the sliding inactivity window (OWASP ASVS v5.0
+	// 7.3.1). Every rotation moves a session's deadline to now + this value, so
+	// it measures time since the last refresh, not time since login.
 	RefreshTokenExpiry time.Duration
+	// RefreshTokenAbsoluteExpiry caps the total lifetime of a rotation chain
+	// however active it is (ASVS 7.3.2). Past it the user must log in again.
+	RefreshTokenAbsoluteExpiry time.Duration
+	// RefreshTokenGracePeriod keeps a just-rotated refresh token usable for a
+	// short while so a client firing several refreshes at once is not logged
+	// out by its own race. Each call inside the window mints a sibling token in
+	// the same family; outside it, the same token counts as a replay. 0
+	// disables the grace window entirely.
+	RefreshTokenGracePeriod time.Duration
 }
 
 // DatabaseConfig contains the PostgreSQL DSN and connection pool tuning.
@@ -83,6 +94,8 @@ type DatabaseConfig struct {
 	MaxIdleConns int
 	// ConnMaxLifetime is the maximum duration a database connection can be reused.
 	ConnMaxLifetime time.Duration
+	// ConnMaxIdleTime is how long a connection may sit idle before it is closed.
+	ConnMaxIdleTime time.Duration
 }
 
 // S3Config contains S3-compatible object storage settings (MinIO, AWS S3, etc.).
@@ -165,10 +178,10 @@ type EmailConfig struct {
 
 // MarketDataConfig contains API keys for external financial data providers.
 type MarketDataConfig struct {
-	// RapidAPIIDXKey is the X-RapidAPI-Key for the Indonesia Stock Exchange API.
+	// RapidAPIKey is the X-RapidAPI-Key used for RapidAPI providers (IDX calendar, YH Finance quotes).
 	// Required to fetch IDX dividend and RUPS calendar data.
 	// Leave empty to disable IDX corporate-action fetching (returns empty results).
-	RapidAPIIDXKey string
+	RapidAPIKey string
 }
 
 // Load reads configuration from environment variables with defaults.
@@ -178,8 +191,8 @@ type MarketDataConfig struct {
 //
 // Some keys accept legacy aliases; the first-set key wins.
 func Load() (*Config, error) {
-	// Best-effort .env loading; missing file is not an error.
-	_ = godotenv.Load()
+	// Best-effort .env loading; missing or unreadable file is not an error.
+	_ = loadDotEnv(".env")
 
 	cfg := &Config{
 		App: AppConfig{
@@ -193,15 +206,18 @@ func Load() (*Config, error) {
 			AllowOrigins:    parseOrigins(envString([]string{"HTTP_ALLOW_ORIGINS"}, "*")),
 		},
 		Auth: AuthConfig{
-			JWTSecret:          envString([]string{"JWT_SECRET"}, ""),
-			JWTExpiry:          time.Duration(envInt([]string{"JWT_EXPIRY_HOURS"}, 3)) * time.Hour,
-			RefreshTokenExpiry: time.Duration(envInt([]string{"REFRESH_TOKEN_EXPIRY_DAYS"}, 7)) * 24 * time.Hour,
+			JWTSecret:                  envString([]string{"JWT_SECRET"}, ""),
+			JWTExpiry:                  resolveJWTExpiry(15 * time.Minute),
+			RefreshTokenExpiry:         resolveRefreshTokenExpiry(3 * 24 * time.Hour),
+			RefreshTokenAbsoluteExpiry: envDuration([]string{"REFRESH_TOKEN_ABSOLUTE_EXPIRY"}, 30*24*time.Hour),
+			RefreshTokenGracePeriod:    envDuration([]string{"REFRESH_TOKEN_GRACE_PERIOD"}, 60*time.Second),
 		},
 		Database: DatabaseConfig{
 			DSN:             envString([]string{"DATABASE_URL"}, ""),
 			MaxOpenConns:    envInt([]string{"DB_POOL_MAX_OPEN", "MAX_OPEN_CONNS"}, 25),
 			MaxIdleConns:    envInt([]string{"DB_POOL_MAX_IDLE", "MAX_IDLE_CONNS"}, 25),
 			ConnMaxLifetime: envDuration([]string{"DB_POOL_CONN_LIFETIME", "CONN_MAX_LIFETIME"}, 15*time.Minute),
+			ConnMaxIdleTime: envDuration([]string{"DB_POOL_CONN_IDLE_TIME", "CONN_MAX_IDLE_TIME"}, 5*time.Minute),
 		},
 		S3: S3Config{
 			Endpoint:  envString([]string{"S3_ENDPOINT", "MINIO_ENDPOINT"}, "localhost:9000"),
@@ -253,7 +269,7 @@ func Load() (*Config, error) {
 			UseTLS:       envBool([]string{"SMTP_TLS"}, false),
 		},
 		MarketData: MarketDataConfig{
-			RapidAPIIDXKey: envString([]string{"RAPIDAPI_IDX_KEY"}, ""),
+			RapidAPIKey: envString([]string{"RAPIDAPI_KEY", "RAPIDAPI_IDX_KEY", "RAPIDAPI_QUOTE_KEY"}, ""),
 		},
 	}
 
@@ -273,10 +289,21 @@ func (c *Config) validate() error {
 		return errors.New("JWT_SECRET must be at least 32 characters long")
 	}
 	if c.Auth.JWTExpiry <= 0 {
-		return errors.New("JWT_EXPIRY_HOURS must be > 0")
+		return errors.New("JWT_EXPIRY (or legacy JWT_EXPIRY_HOURS) must be > 0")
 	}
 	if c.Auth.RefreshTokenExpiry <= 0 {
-		return errors.New("REFRESH_TOKEN_EXPIRY_DAYS must be > 0")
+		return errors.New("REFRESH_TOKEN_EXPIRY (or legacy REFRESH_TOKEN_EXPIRY_DAYS) must be > 0")
+	}
+	if c.Auth.RefreshTokenAbsoluteExpiry <= 0 {
+		return errors.New("REFRESH_TOKEN_ABSOLUTE_EXPIRY must be > 0")
+	}
+	// An absolute cap below the sliding window would silently override it and
+	// make the sliding setting meaningless.
+	if c.Auth.RefreshTokenAbsoluteExpiry < c.Auth.RefreshTokenExpiry {
+		return errors.New("REFRESH_TOKEN_ABSOLUTE_EXPIRY must be >= REFRESH_TOKEN_EXPIRY")
+	}
+	if c.Auth.RefreshTokenGracePeriod < 0 {
+		return errors.New("REFRESH_TOKEN_GRACE_PERIOD must be >= 0")
 	}
 	if c.Database.DSN == "" {
 		return errors.New("DATABASE_URL is required")
@@ -341,4 +368,43 @@ func (c *Config) TrustedProxyCIDRs() []string {
 		return nil
 	}
 	return []string{"0.0.0.0/0", "::/0"}
+}
+
+// loadDotEnv reads a .env file if present and sets any environment variables
+// that are not already set. Missing or unreadable files return an error.
+// System or container environment variables always take precedence.
+func loadDotEnv(filepath string) error {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, value)
+		}
+	}
+
+	return scanner.Err()
 }

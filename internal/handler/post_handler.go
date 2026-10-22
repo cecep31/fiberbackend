@@ -19,10 +19,18 @@ type PostHandler struct {
 	postViewService service.PostViewService
 }
 
+// maxPostLimit caps the page size for post listing queries.
+const maxPostLimit = 100
+
+// maxSitemapPostLimit is the default and maximum limit for sitemap posts.
+const maxSitemapPostLimit = 50000
+
 func (h *PostHandler) respondPostError(c fiber.Ctx, message string, err error) error {
 	switch {
 	case errors.Is(err, apperrors.ErrPostNotFound):
 		return response.NotFound(c, message, err)
+	case errors.Is(err, apperrors.ErrPostSpamRejected):
+		return respondSpamRejected(c, "Post rejected by anti-spam policy", "body", err)
 	case errors.Is(err, apperrors.ErrNotAuthor), errors.Is(err, apperrors.ErrPostNotOwned):
 		return response.Forbidden(c, message)
 	case errors.Is(err, apperrors.ErrFileNil), errors.Is(err, apperrors.ErrFileTooLarge), errors.Is(err, apperrors.ErrInvalidFileType), errors.Is(err, apperrors.ErrStorageUnavailable):
@@ -56,16 +64,14 @@ func (h *PostHandler) GetPosts(c fiber.Ctx) error {
 			filter.Limit = limitInt
 		}
 	}
+	// Cap limit to prevent unbounded queries (DoS vector).
+	if filter.Limit > maxPostLimit {
+		filter.Limit = maxPostLimit
+	}
 
 	if offset := c.Query("offset"); offset != "" {
 		if offsetInt, err := strconv.Atoi(offset); err == nil && offsetInt > 0 {
 			filter.Offset = offsetInt
-		}
-	}
-
-	if published := c.Query("published"); published != "" {
-		if pubBool, err := strconv.ParseBool(published); err == nil {
-			filter.Published = &pubBool
 		}
 	}
 
@@ -154,12 +160,7 @@ func (h *PostHandler) UpdateMyPost(c fiber.Ctx) error {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	err := h.postService.IsAuthor(c.Context(), id, userID)
-	if err != nil {
-		return h.respondPostError(c, "Failed to check post ownership", err)
-	}
-
-	updatedPost, err := h.postService.UpdatePost(c.Context(), id, &updateDTO)
+	updatedPost, err := h.postService.UpdateMyPost(c.Context(), id, userID, &updateDTO)
 	if err != nil {
 		return h.respondPostError(c, "Failed to update post", err)
 	}
@@ -240,12 +241,7 @@ func (h *PostHandler) DeleteMyPost(c fiber.Ctx) error {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	if err := h.postService.IsAuthor(c.Context(), id, userID); err != nil {
-		return h.respondPostError(c, "Failed to check post ownership", err)
-	}
-
-	err := h.postService.DeletePostByID(c.Context(), id)
-	if err != nil {
+	if err := h.postService.DeleteMyPost(c.Context(), id, userID); err != nil {
 		return h.respondPostError(c, "Failed to delete post", err)
 	}
 
@@ -288,7 +284,16 @@ func (h *PostHandler) GetMyPosts(c fiber.Ctx) error {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	posts, total, err := h.postService.GetPostsByCreatedBy(c.Context(), userID, offset, limit)
+	search := c.Query("search")
+
+	var published *bool
+	if pub := c.Query("published"); pub != "" {
+		if pubBool, err := strconv.ParseBool(pub); err == nil {
+			published = &pubBool
+		}
+	}
+
+	posts, total, err := h.postService.GetPostsByCreatedBy(c.Context(), userID, offset, limit, search, published)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get posts", err)
 	}
@@ -312,7 +317,7 @@ func (h *PostHandler) GetMyPostsAnalytics(c fiber.Ctx) error {
 
 	analytics, err := h.postViewService.GetMyPostsAnalytics(c.Context(), userID, q)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get post analytics", err)
+		return respondError(c, "Failed to get post analytics", err)
 	}
 
 	return response.Success(c, "Successfully retrieved post analytics", analytics)
@@ -400,14 +405,28 @@ func (h *PostHandler) UploadImagePosts(c fiber.Ctx) error {
 		return response.BadRequest(c, "No file uploaded", nil)
 	}
 
-	if err := h.postService.UploadImagePosts(c.Context(), file); err != nil {
+	imagePath, err := h.postService.UploadImagePosts(c.Context(), file)
+	if err != nil {
 		return h.respondPostError(c, "Failed to upload image", err)
 	}
-	return response.Success(c, "Successfully uploaded image", nil)
+	return response.Created(c, "Successfully uploaded image", map[string]string{
+		"path": imagePath,
+		"url":  imagePath,
+	})
 }
 
 func (h *PostHandler) GetPostsForSitemap(c fiber.Ctx) error {
-	posts, err := h.postService.GetPostsForSitemap(c.Context(), 1000)
+	limit := maxSitemapPostLimit
+	if l := c.Query("limit"); l != "" {
+		if limitInt, err := strconv.Atoi(l); err == nil && limitInt > 0 {
+			limit = limitInt
+		}
+	}
+	if limit > maxSitemapPostLimit {
+		limit = maxSitemapPostLimit
+	}
+
+	posts, err := h.postService.GetPostsForSitemap(c.Context(), limit)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get posts for sitemap", err)
 	}

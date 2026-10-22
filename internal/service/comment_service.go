@@ -14,7 +14,7 @@ type CommentService interface {
 	GetCommentsByPostID(ctx context.Context, postID string) ([]*dto.CommentResponse, error)
 	GetCommentByID(ctx context.Context, id string) (*dto.CommentResponse, error)
 	UpdateComment(ctx context.Context, id string, content string, userID string) (*dto.CommentResponse, error)
-	DeleteComment(ctx context.Context, id string, userID string) error
+	DeleteComment(ctx context.Context, id string, userID string, isAdmin bool) error
 	IsCommentAuthor(ctx context.Context, commentID string, userID string) error
 }
 
@@ -33,9 +33,16 @@ func NewCommentService(commentRepo repository.CommentRepository, postRepo reposi
 }
 
 func (s *commentService) CreateComment(ctx context.Context, postID string, req *dto.CreateCommentRequest, createdBy string) (*dto.CommentResponse, error) {
+	if err := rejectSpamText(req.Text); err != nil {
+		return nil, err
+	}
+
 	post, err := s.postRepo.GetPostByID(ctx, postID)
 	if err != nil {
 		return nil, apperrors.ErrPostNotFound
+	}
+	if err := ensurePostInteractable(post); err != nil {
+		return nil, err
 	}
 
 	comment := &model.PostComment{
@@ -73,9 +80,12 @@ func (s *commentService) CreateComment(ctx context.Context, postID string, req *
 }
 
 func (s *commentService) GetCommentsByPostID(ctx context.Context, postID string) ([]*dto.CommentResponse, error) {
-	_, err := s.postRepo.GetPostByID(ctx, postID)
+	post, err := s.postRepo.GetPostByID(ctx, postID)
 	if err != nil {
 		return nil, apperrors.ErrPostNotFound
+	}
+	if err := ensurePostInteractable(post); err != nil {
+		return nil, err
 	}
 
 	comments, err := s.commentRepo.GetCommentsByPostID(ctx, postID)
@@ -100,6 +110,10 @@ func (s *commentService) GetCommentByID(ctx context.Context, id string) (*dto.Co
 }
 
 func (s *commentService) UpdateComment(ctx context.Context, id string, text string, userID string) (*dto.CommentResponse, error) {
+	if err := rejectSpamText(text); err != nil {
+		return nil, err
+	}
+
 	comment, err := s.commentRepo.GetCommentByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -122,13 +136,15 @@ func (s *commentService) UpdateComment(ctx context.Context, id string, text stri
 	return dto.CommentToResponse(updated), nil
 }
 
-func (s *commentService) DeleteComment(ctx context.Context, id string, userID string) error {
+// DeleteComment deletes a comment. Ownership is enforced unless isAdmin is
+// true, in which case a super admin may delete any comment (moderation).
+func (s *commentService) DeleteComment(ctx context.Context, id string, userID string, isAdmin bool) error {
 	comment, err := s.commentRepo.GetCommentByID(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	if comment.CreatedBy != userID {
+	if !isAdmin && comment.CreatedBy != userID {
 		return apperrors.ErrCommentNotOwned
 	}
 

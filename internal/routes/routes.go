@@ -26,8 +26,13 @@ type Routes struct {
 	exchangeRateHandler     *handler.ExchangeRateHandler
 	bookmarkHandler         *handler.BookmarkHandler
 	notificationHandler     *handler.NotificationHandler
-	reportHandler           *handler.ReportHandler
 	corporateActionHandler  *handler.CorporateActionHandler
+	guildHandler            *handler.GuildHandler
+	guildChannelHandler     *handler.GuildChannelHandler
+	postReportHandler       *handler.PostReportHandler
+	postStatsHandler        *handler.PostStatsHandler
+	tagStatsHandler         *handler.TagStatsHandler
+	userStatsHandler        *handler.UserStatsHandler
 }
 
 func NewRoutes(
@@ -47,8 +52,13 @@ func NewRoutes(
 	exchangeRateHandler *handler.ExchangeRateHandler,
 	bookmarkHandler *handler.BookmarkHandler,
 	notificationHandler *handler.NotificationHandler,
-	reportHandler *handler.ReportHandler,
 	corporateActionHandler *handler.CorporateActionHandler,
+	guildHandler *handler.GuildHandler,
+	guildChannelHandler *handler.GuildChannelHandler,
+	postReportHandler *handler.PostReportHandler,
+	postStatsHandler *handler.PostStatsHandler,
+	tagStatsHandler *handler.TagStatsHandler,
+	userStatsHandler *handler.UserStatsHandler,
 ) *Routes {
 	return &Routes{
 		config:                  config,
@@ -67,8 +77,13 @@ func NewRoutes(
 		exchangeRateHandler:     exchangeRateHandler,
 		bookmarkHandler:         bookmarkHandler,
 		notificationHandler:     notificationHandler,
-		reportHandler:           reportHandler,
 		corporateActionHandler:  corporateActionHandler,
+		guildHandler:            guildHandler,
+		guildChannelHandler:     guildChannelHandler,
+		postReportHandler:       postReportHandler,
+		postStatsHandler:        postStatsHandler,
+		tagStatsHandler:         tagStatsHandler,
+		userStatsHandler:        userStatsHandler,
 	}
 }
 
@@ -88,7 +103,7 @@ func (r *Routes) setupAPIRoutes(api fiber.Router) {
 	r.setupExchangeRateRoutes(api)
 	r.setupBookmarkRoutes(api)
 	r.setupNotificationRoutes(api)
-	r.setupReportRoutes(api)
+	r.setupGuildRoutes(api)
 }
 
 func (r *Routes) setupChatConversationRoutes(api fiber.Router) {

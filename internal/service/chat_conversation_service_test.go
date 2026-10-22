@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"fiberbackend/config"
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
+	"fiberbackend/internal/platform/openrouter"
 )
 
 type mockChatConversationRepo struct {
@@ -73,18 +75,99 @@ func (m *mockChatConversationRepo) DeleteMessage(ctx context.Context, id, userID
 }
 
 type mockOpenRouterService struct {
-	generateStreamFn func(ctx context.Context, messages []OpenRouterMessage, model *string, temperature float64) (<-chan string, <-chan OpenRouterUsage, <-chan error)
+	generateStreamFn func(ctx context.Context, messages []openrouter.Message, model *string, temperature float64) (<-chan string, <-chan openrouter.Usage, <-chan error)
 }
 
-func (m *mockOpenRouterService) GenerateResponse(ctx context.Context, messages []OpenRouterMessage, model *string, temperature float64) (*OpenRouterResponse, error) {
+func (m *mockOpenRouterService) GenerateResponse(ctx context.Context, messages []openrouter.Message, model *string, temperature float64) (*openrouter.Response, error) {
 	return nil, nil
 }
 
-func (m *mockOpenRouterService) GenerateStream(ctx context.Context, messages []OpenRouterMessage, model *string, temperature float64) (<-chan string, <-chan OpenRouterUsage, <-chan error) {
+func (m *mockOpenRouterService) GenerateStream(ctx context.Context, messages []openrouter.Message, model *string, temperature float64) (<-chan string, <-chan openrouter.Usage, <-chan error) {
 	if m.generateStreamFn != nil {
 		return m.generateStreamFn(ctx, messages, model, temperature)
 	}
 	return nil, nil, nil
+}
+
+func TestBuildConversationTitle(t *testing.T) {
+	t.Parallel()
+
+	ptr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name    string
+		title   *string
+		content string
+		want    string
+	}{
+		{
+			name:    "explicit title respected",
+			title:   ptr("  Laporan Q1  "),
+			content: "abaikan ini",
+			want:    "Laporan Q1",
+		},
+		{
+			name:    "empty content falls back",
+			title:   nil,
+			content: "   ",
+			want:    "New conversation",
+		},
+		{
+			name:    "strips leading filler words",
+			title:   nil,
+			content: "tolong buatkan laporan keuangan bulan januari untuk presentasi besok",
+			want:    "laporan keuangan bulan januari untuk presentasi besok",
+		},
+		{
+			name:    "takes first sentence",
+			title:   nil,
+			content: "Apa itu inflasi? Jelaskan dampaknya ke pasar saham Indonesia secara detail",
+			want:    "inflasi",
+		},
+		{
+			name:    "truncates at word boundary",
+			title:   nil,
+			content: "analisis perbandingan saham bank BCA BRI Mandiri BNI BTN CIMB Danamon Permata OCBC tahun ini",
+			want:    "analisis perbandingan saham bank BCA BRI Mandiri BNI",
+		},
+		{
+			name:    "never splits UTF-8 rune",
+			title:   nil,
+			content: "ceritakan tentang café crème brûlée naïve façade di kota Zürich yang indah sekali dan menawan hati",
+			want:    "ceritakan tentang café crème brûlée naïve façade di",
+		},
+		{
+			name:    "strips markdown and list prefix",
+			title:   nil,
+			content: "### 1. Jelaskan strategi investasi untuk pemula yang baru mulai",
+			want:    "strategi investasi untuk pemula yang baru mulai",
+		},
+		{
+			name:    "strips trailing filler",
+			title:   nil,
+			content: "jelaskan bedanya saham dan obligasi untuk pemula ya",
+			want:    "bedanya saham dan obligasi untuk pemula",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := buildConversationTitle(tt.title, tt.content); got != tt.want {
+				t.Fatalf("buildConversationTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildConversationTitle_ExplicitLongTitleTruncatedToDBLimit(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("a", 300)
+	got := buildConversationTitle(&long, "fallback")
+	if gotLen := len([]rune(got)); gotLen != maxExplicitTitleRunes {
+		t.Fatalf("explicit title runes = %d, want %d", gotLen, maxExplicitTitleRunes)
+	}
 }
 
 func TestCreateStreamingMessage_ForwardsAllChunksToClient(t *testing.T) {
@@ -123,15 +206,15 @@ func TestCreateStreamingMessage_ForwardsAllChunksToClient(t *testing.T) {
 	}
 
 	openRouter := &mockOpenRouterService{
-		generateStreamFn: func(ctx context.Context, messages []OpenRouterMessage, model *string, temperature float64) (<-chan string, <-chan OpenRouterUsage, <-chan error) {
+		generateStreamFn: func(ctx context.Context, messages []openrouter.Message, model *string, temperature float64) (<-chan string, <-chan openrouter.Usage, <-chan error) {
 			chunks := make(chan string, 2)
-			usageCh := make(chan OpenRouterUsage, 1)
+			usageCh := make(chan openrouter.Usage, 1)
 			errCh := make(chan error, 1)
 
 			chunks <- "Hello "
 			chunks <- "world"
 			close(chunks)
-			usageCh <- OpenRouterUsage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}
+			usageCh <- openrouter.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}
 			close(usageCh)
 			close(errCh)
 

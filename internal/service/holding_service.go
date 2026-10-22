@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,9 +12,13 @@ import (
 	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
+	"fiberbackend/internal/platform/market"
 	"fiberbackend/internal/repository"
-	"fiberbackend/pkg/market"
 )
+
+// maxMonthlyRangeMonths bounds how many months GetMonthlyData will iterate,
+// so a huge (but validly ordered) start/end range can't build an unbounded result slice.
+const maxMonthlyRangeMonths = 240 // 20 years
 
 type holdingCache interface {
 	BuildKey(parts ...string) string
@@ -311,6 +316,13 @@ func (s *holdingService) GetMonthlyData(ctx context.Context, userID string, q *d
 		return nil, apperrors.ErrHoldingInvalidRange
 	}
 
+	// Cap the span so the month-by-month loop below (and its result slice)
+	// can't be forced to grow unbounded by a caller passing a huge valid range.
+	spanMonths := (q.StartYear-q.EndYear)*12 + (q.StartMonth - q.EndMonth)
+	if spanMonths > maxMonthlyRangeMonths {
+		return nil, apperrors.ErrHoldingRangeTooLarge
+	}
+
 	data, err := s.holdingRepo.GetMonthlyData(ctx, userID, q.StartMonth, q.StartYear, q.EndMonth, q.EndYear)
 	if err != nil {
 		return nil, err
@@ -538,8 +550,14 @@ func buildCompareMap(data []struct {
 }
 
 func buildCompareBreakdownResult(allNames map[string]bool, fromMap, toMap map[string]struct{ Invested, CurrentValue float64 }) []dto.HoldingCompareBreakdown {
-	var result []dto.HoldingCompareBreakdown
+	names := make([]string, 0, len(allNames))
 	for name := range allNames {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var result []dto.HoldingCompareBreakdown
+	for _, name := range names {
 		from := fromMap[name]
 		to := toMap[name]
 		fromPL := from.CurrentValue - from.Invested

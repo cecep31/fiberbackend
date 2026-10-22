@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"fiberbackend/config"
 	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
+	"fiberbackend/internal/platform/openrouter"
 	"fiberbackend/internal/repository"
 )
 
@@ -22,7 +24,7 @@ type ChatConversationService interface {
 	DeleteConversation(ctx context.Context, id string, userID string) error
 	CreateMessage(ctx context.Context, userID, conversationID string, req *dto.CreateChatMessageRequest) ([]*dto.ChatMessageResponse, error)
 	CreateStreamingMessage(ctx context.Context, userID, conversationID string, req *dto.CreateChatMessageRequest) (*dto.ChatStreamResult, <-chan string, <-chan dto.ChatMessageResponse, <-chan error, error)
-	SaveStreamingMessage(ctx context.Context, conversationID, userID, content string, model *string, usage OpenRouterUsage) (*dto.ChatMessageResponse, error)
+	SaveStreamingMessage(ctx context.Context, conversationID, userID, content string, model *string, usage openrouter.Usage) (*dto.ChatMessageResponse, error)
 	GetMessages(ctx context.Context, conversationID, userID string) ([]*dto.ChatMessageResponse, error)
 	GetMessage(ctx context.Context, id, userID string) (*dto.ChatMessageResponse, error)
 	DeleteMessage(ctx context.Context, id, userID string) (*dto.ChatMessageResponse, error)
@@ -30,11 +32,11 @@ type ChatConversationService interface {
 
 type chatConversationService struct {
 	conversationRepo repository.ChatConversationRepository
-	openRouter       OpenRouterService
+	openRouter       openrouter.Client
 	config           *config.Config
 }
 
-func NewChatConversationService(conversationRepo repository.ChatConversationRepository, openRouter OpenRouterService, cfg *config.Config) ChatConversationService {
+func NewChatConversationService(conversationRepo repository.ChatConversationRepository, openRouter openrouter.Client, cfg *config.Config) ChatConversationService {
 	return &chatConversationService{
 		conversationRepo: conversationRepo,
 		openRouter:       openRouter,
@@ -305,7 +307,7 @@ func (s *chatConversationService) createStreamingMessageInternal(ctx context.Con
 			return
 		}
 
-		usage := OpenRouterUsage{}
+		usage := openrouter.Usage{}
 		if u, ok := <-usageCh; ok {
 			usage = u
 		}
@@ -324,7 +326,7 @@ func (s *chatConversationService) createStreamingMessageInternal(ctx context.Con
 	return result, outChunks, complete, errCh, nil
 }
 
-func (s *chatConversationService) SaveStreamingMessage(ctx context.Context, conversationID, userID, content string, modelID *string, usage OpenRouterUsage) (*dto.ChatMessageResponse, error) {
+func (s *chatConversationService) SaveStreamingMessage(ctx context.Context, conversationID, userID, content string, modelID *string, usage openrouter.Usage) (*dto.ChatMessageResponse, error) {
 	now := time.Now()
 	message := &model.ChatMessage{
 		ConversationID:   conversationID,
@@ -395,16 +397,165 @@ func (s *chatConversationService) getOwnedConversation(ctx context.Context, id, 
 
 func buildConversationTitle(title *string, fallbackContent string) string {
 	if title != nil && strings.TrimSpace(*title) != "" {
-		return strings.TrimSpace(*title)
+		// Judul eksplisit dari client: hormati isinya, cukup rapikan
+		// whitespace dan batasi ke kapasitas kolom DB (varchar 255).
+		return truncateRunes(normalizeSpace(*title), maxExplicitTitleRunes)
 	}
-	trimmed := strings.Join(strings.Fields(strings.TrimSpace(fallbackContent)), " ")
+	trimmed := normalizeSpace(fallbackContent)
 	if trimmed == "" {
-		return "New conversation"
+		return defaultConversationTitle
 	}
-	if len(trimmed) > 50 {
-		return trimmed[:50]
+	// Ambil baris/kalimat pertama agar tidak kepotong tengah kalimat.
+	candidate := firstSentence(trimmed)
+	words := strings.Fields(candidate)
+	words = stripLeadingFillers(words)
+	words = stripTrailingFillers(words)
+	if len(words) == 0 {
+		words = strings.Fields(candidate)
 	}
-	return trimmed
+	titleStr := truncateWords(words, maxTitleWords, maxTitleRunes)
+	if titleStr == "" {
+		return defaultConversationTitle
+	}
+	return titleStr
+}
+
+const (
+	defaultConversationTitle = "New conversation"
+	// Judul auto dari pesan pertama: pendek ala daftar chat.
+	maxTitleWords = 8
+	maxTitleRunes = 60
+	// Judul eksplisit: ikuti kapasitas kolom DB.
+	maxExplicitTitleRunes = 255
+)
+
+// normalizeSpace memadatkan semua whitespace menjadi satu spasi.
+func normalizeSpace(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+// truncateRunes memotong string per rune (aman untuk UTF-8).
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes])
+}
+
+// firstSentence mengambil baris pertama, lalu potong di akhir kalimat
+// pertama (. ! ? …) bila prefix-nya sudah cukup bermakna (>=3 kata).
+// Juga membersihkan prefix markdown/list seperti "# ", "> ", "- ", "1. ".
+func firstSentence(s string) string {
+	if i := strings.IndexRune(s, '\n'); i >= 0 {
+		if first := strings.TrimSpace(s[:i]); first != "" {
+			s = first
+		}
+	}
+	s = strings.TrimLeft(s, "#>*-•–— \t")
+	if dot := strings.Index(s, ". "); dot > 0 {
+		if head := strings.TrimSpace(s[:dot]); len(strings.Fields(head)) >= 3 {
+			s = head
+		}
+	}
+	end := -1
+	for i, r := range s {
+		if r == '!' || r == '?' || r == '…' {
+			end = i + len(string(r))
+			break
+		}
+		if r == '.' {
+			end = i + 1
+			break
+		}
+	}
+	if end > 0 {
+		if head := strings.TrimSpace(s[:end]); len(strings.Fields(head)) >= 3 {
+			s = head
+		}
+	}
+	// Strip "1. ", "12) " ala numbered list di awal.
+	rest := strings.TrimLeft(s, "0123456789")
+	if len(rest) < len(s) {
+		if r, _ := utf8.DecodeRuneInString(rest); r == '.' || r == ')' {
+			if t := strings.TrimSpace(rest[utf8.RuneLen(r):]); t != "" {
+				s = t
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Trim(s, " \t\"'“”‘’.,:;!?…-–—"))
+}
+
+// Kata pengisi di awal pesan (ID/EN) yang buruk untuk judul.
+var leadingFillerWords = map[string]struct{}{
+	"tolong": {}, "mohon": {}, "please": {}, "pls": {}, "plis": {},
+	"coba": {}, "cobalah": {}, "bisakah": {}, "bisa": {}, "bolehkah": {},
+	"gimana": {}, "bagaimana": {}, "cara": {},
+	"buatkan": {}, "buatin": {}, "bikinkan": {}, "bikinin": {},
+	"tuliskan": {}, "tulis": {}, "tuliskanlah": {},
+	"jelaskan": {}, "jelasin": {}, "jelasken": {},
+	"kasih": {}, "kasi": {}, "berikan": {}, "beritahu": {},
+	"beritahukan": {}, "tunjukkan": {}, "tunjukin": {},
+	"apa": {}, "apakah": {}, "itu": {}, "ini": {},
+	"halo": {}, "haloo": {}, "hallo": {}, "hai": {}, "hi": {}, "hello": {},
+}
+
+// Kata pengisi di akhir pesan yang buruk untuk judul.
+var trailingFillerWords = map[string]struct{}{
+	"ya": {}, "yah": {}, "dong": {}, "donk": {}, "sih": {},
+	"deh": {}, "loh": {}, "lho": {}, "kah": {}, "tuh": {},
+}
+
+func stripLeadingFillers(words []string) []string {
+	stripped := 0
+	for len(words) > 0 && stripped < 2 {
+		if _, ok := leadingFillerWords[strings.ToLower(words[0])]; !ok {
+			break
+		}
+		words = words[1:]
+		stripped++
+	}
+	return words
+}
+
+func stripTrailingFillers(words []string) []string {
+	for len(words) > 3 {
+		if _, ok := trailingFillerWords[strings.ToLower(words[len(words)-1])]; !ok {
+			break
+		}
+		words = words[:len(words)-1]
+	}
+	return words
+}
+
+// truncateWords menggabung maxWords kata pertama dan memastikan panjang
+// tidak melebihi maxRunes, selalu potong di batas kata (tidak pernah
+// memotong tengah kata maupun tengah rune UTF-8).
+func truncateWords(words []string, maxWords, maxRunes int) string {
+	if len(words) > maxWords {
+		words = words[:maxWords]
+	}
+	out := strings.Join(words, " ")
+	out = strings.Trim(out, " \t\"'“”‘’.,:;!?…-–—")
+	if out == "" {
+		return ""
+	}
+	runes := []rune(out)
+	if len(runes) <= maxRunes {
+		return out
+	}
+	cut := maxRunes
+	for cut > 0 && runes[cut] != ' ' {
+		cut--
+	}
+	if cut == 0 {
+		// Kata pertama sendiri lebih panjang dari batas: potong keras.
+		return string(runes[:maxRunes])
+	}
+	return strings.TrimRight(string(runes[:cut]), " \t.,:;!?…-–—")
 }
 
 func normalizedRole(role string) string {
@@ -422,10 +573,10 @@ func normalizedTemperature(v *float64) float64 {
 	return *v
 }
 
-func toOpenRouterMessages(messages []*model.ChatMessage) []OpenRouterMessage {
-	result := make([]OpenRouterMessage, 0, len(messages))
+func toOpenRouterMessages(messages []*model.ChatMessage) []openrouter.Message {
+	result := make([]openrouter.Message, 0, len(messages))
 	for _, message := range messages {
-		result = append(result, OpenRouterMessage{
+		result = append(result, openrouter.Message{
 			Role:    message.Role,
 			Content: message.Content,
 		})

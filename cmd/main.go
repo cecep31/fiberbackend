@@ -40,6 +40,13 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:   "fiberbackend",
 		BodyLimit: 10 * 1024 * 1024, // 10MB request body limit
+		// ReadTimeout covers the full request body read. For most endpoints 60 s
+		// is fine, but file uploads can be slow on poor connections; the 10 MB
+		// body limit bounds abuse. fasthttp applies WriteTimeout per chunk write,
+		// so SSE streams (heartbeat every 25 s) stay well inside it.
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  60 * time.Second,
 		// When TrustProxy is enabled, client IP is extracted from
 		// X-Forwarded-For. Use only behind a trusted reverse proxy.
 		TrustProxy: conf.HTTP.TrustProxy,
@@ -63,21 +70,35 @@ func main() {
 		return healthCheck(c, container)
 	})
 
-	// Start server in a goroutine.
+	// Start server in a goroutine. A listener failure (e.g. port already in
+	// use) must stop the process; otherwise it would keep waiting for a signal
+	// while serving nothing.
+	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("starting server", "port", conf.HTTP.Port)
 		addr := ":" + conf.HTTP.Port
 		if err := app.Listen(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server exited unexpectedly", "error", err)
+			serverErr <- err
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server with a timeout of 10 seconds.
+	// Wait for an interrupt signal or a server failure, then shut down with a
+	// timeout of 10 seconds.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
 
-	slog.Info("server is shutting down")
+	exitCode := 0
+	select {
+	case <-quit:
+		slog.Info("server is shutting down")
+	case err := <-serverErr:
+		slog.Error("server exited unexpectedly", "error", err)
+		exitCode = 1
+	}
+
+	// End open SSE (realtime) streams first so graceful shutdown does not
+	// block waiting on them.
+	container.CloseStreams()
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -100,6 +121,7 @@ func main() {
 	}
 
 	slog.Info("server exited")
+	os.Exit(exitCode)
 }
 
 func helloWorld(c fiber.Ctx) error {

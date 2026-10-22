@@ -31,7 +31,6 @@ type PostQueryFilter struct {
 	SortOrder string   `json:"sort_order" query:"sort_order"`
 	StartDate string   `json:"start_date" query:"start_date"`
 	EndDate   string   `json:"end_date" query:"end_date"`
-	Published *bool    `json:"published" query:"published"`
 	CreatedBy string   `json:"created_by" query:"created_by"`
 	Tags      []string `json:"tags" query:"tags"`
 }
@@ -68,21 +67,23 @@ func (f *PostQueryFilter) GetSortOrder() string {
 }
 
 type PostResponse struct {
-	ID            string        `json:"id"`
-	Title         *string       `json:"title"`
-	PhotoURL      *string       `json:"photo_url"`
-	Body          *string       `json:"body"`
-	Slug          *string       `json:"slug"`
-	ViewCount     int64         `json:"view_count"`
-	LikeCount     int64         `json:"like_count"`
-	BookmarkCount int64         `json:"bookmark_count"`
-	Published     *bool         `json:"published"`
-	PublishedAt   *time.Time    `json:"published_at"`
-	User          *UserBrief    `json:"user,omitempty"`
-	Tags          []TagResponse `json:"tags,omitempty"`
-	CreatedAt     *time.Time    `json:"created_at"`
-	UpdatedAt     *time.Time    `json:"updated_at"`
-	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`
+	ID            string     `json:"id"`
+	Title         *string    `json:"title"`
+	PhotoURL      *string    `json:"photo_url"`
+	Body          *string    `json:"body"`
+	Slug          *string    `json:"slug"`
+	ViewCount     int64      `json:"view_count"`
+	LikeCount     int64      `json:"like_count"`
+	BookmarkCount int64      `json:"bookmark_count"`
+	Published     *bool      `json:"published"`
+	PublishedAt   *time.Time `json:"published_at"`
+	// HiddenAt is only ever non-null for the author and admins: hidden posts
+	// are not served publicly.
+	HiddenAt  *time.Time    `json:"hidden_at"`
+	User      *UserBrief    `json:"user,omitempty"`
+	Tags      []TagResponse `json:"tags,omitempty"`
+	CreatedAt *time.Time    `json:"created_at"`
+	UpdatedAt *time.Time    `json:"updated_at"`
 }
 
 func PostToResponse(p *model.Post) *PostResponse {
@@ -99,11 +100,6 @@ func PostToResponse(p *model.Post) *PostResponse {
 		}
 	}
 
-	var deletedAtTime *time.Time
-	if p.DeletedAt.Valid {
-		deletedAtTime = &p.DeletedAt.Time
-	}
-
 	return &PostResponse{
 		ID:            p.ID,
 		Title:         p.Title,
@@ -115,11 +111,11 @@ func PostToResponse(p *model.Post) *PostResponse {
 		BookmarkCount: p.BookmarkCount,
 		Published:     p.Published,
 		PublishedAt:   p.PublishedAt,
+		HiddenAt:      p.HiddenAt,
 		User:          userResp,
 		Tags:          tagResponses,
 		CreatedAt:     p.CreatedAt,
 		UpdatedAt:     p.UpdatedAt,
-		DeletedAt:     deletedAtTime,
 	}
 }
 

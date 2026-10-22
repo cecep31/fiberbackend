@@ -35,7 +35,8 @@ func RecoverWithLog() fiber.Handler {
 					"uri", c.OriginalURL(),
 					"stack", string(stack[:length]),
 				)
-				err = tmpErr
+				// Sanitized: never leak the panic value to the client.
+				err = fiber.NewError(fiber.StatusInternalServerError, "Internal server error")
 			}
 		}()
 		return c.Next()

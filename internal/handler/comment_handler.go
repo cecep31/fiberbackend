@@ -10,11 +10,13 @@ import (
 
 type CommentHandler struct {
 	commentService service.CommentService
+	userService    service.UserService
 }
 
-func NewCommentHandler(commentService service.CommentService) *CommentHandler {
+func NewCommentHandler(commentService service.CommentService, userService service.UserService) *CommentHandler {
 	return &CommentHandler{
 		commentService: commentService,
+		userService:    userService,
 	}
 }
 
@@ -40,7 +42,7 @@ func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 
 	comment, err := h.commentService.CreateComment(c.Context(), postID, &commentDTO, userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to create comment", err)
+		return respondError(c, "Failed to create comment", err)
 	}
 
 	return response.Created(c, "Comment created successfully", comment)
@@ -54,7 +56,7 @@ func (h *CommentHandler) GetCommentsByPostID(c fiber.Ctx) error {
 
 	comments, err := h.commentService.GetCommentsByPostID(c.Context(), postID)
 	if err != nil {
-		return response.InternalServerError(c, "Comments fetched failed", err)
+		return respondError(c, "Comments fetched failed", err)
 	}
 
 	return response.Success(c, "Comments fetched successfully", comments)
@@ -82,7 +84,7 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 
 	comment, err := h.commentService.UpdateComment(c.Context(), commentID, commentDTO.Text, userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to update comment", err)
+		return respondError(c, "Failed to update comment", err)
 	}
 
 	return response.Success(c, "Comment updated successfully", comment)
@@ -99,8 +101,11 @@ func (h *CommentHandler) DeleteComment(c fiber.Ctx) error {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	if err := h.commentService.DeleteComment(c.Context(), commentID, userID); err != nil {
-		return response.InternalServerError(c, "Failed to delete comment", err)
+	// Super admins may delete any comment for moderation purposes.
+	isAdmin := isSuperAdmin(c.Context(), h.userService, userID)
+
+	if err := h.commentService.DeleteComment(c.Context(), commentID, userID, isAdmin); err != nil {
+		return respondError(c, "Failed to delete comment", err)
 	}
 
 	return response.Success(c, "Comment deleted successfully", nil)

@@ -1,6 +1,8 @@
 package dto
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,7 +96,6 @@ func TestPostToResponse(t *testing.T) {
 	}
 
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	deletedAt := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
 	post := &model.Post{
 		ID:            "post-1",
 		Title:         new("Post title"),
@@ -108,7 +109,6 @@ func TestPostToResponse(t *testing.T) {
 		PublishedAt:   &now,
 		CreatedAt:     &now,
 		UpdatedAt:     &now,
-		DeletedAt:     gorm.DeletedAt{Time: deletedAt, Valid: true},
 		User: &model.User{
 			ID:       "user-1",
 			Username: new("author"),
@@ -125,9 +125,6 @@ func TestPostToResponse(t *testing.T) {
 	}
 	if len(resp.Tags) != 2 || resp.Tags[0].Name != "go" || resp.Tags[1].Name != "api" {
 		t.Fatalf("unexpected tags: %+v", resp.Tags)
-	}
-	if resp.DeletedAt == nil || !resp.DeletedAt.Equal(deletedAt) {
-		t.Fatalf("expected deleted_at %v, got %v", deletedAt, resp.DeletedAt)
 	}
 }
 
@@ -182,8 +179,12 @@ func TestSimpleModelConverters(t *testing.T) {
 	ip := "127.0.0.1"
 	agent := "test-agent"
 	view := PostViewToResponse(&model.PostView{ID: "view-1", PostID: "post-1", UserID: new("user-1"), IPAddress: &ip, UserAgent: &agent, CreatedAt: &now, UpdatedAt: &now})
-	if view.ID != "view-1" || view.UserID == nil || *view.UserID != "user-1" || view.IPAddress != &ip || view.UserAgent != &agent {
+	if view.ID != "view-1" || view.UserID == nil || *view.UserID != "user-1" {
 		t.Fatalf("unexpected view response: %+v", view)
+	}
+	// Viewer IP address and user agent must never be exposed in API responses.
+	if raw, err := json.Marshal(view); err != nil || strings.Contains(string(raw), ip) || strings.Contains(string(raw), agent) {
+		t.Fatalf("view response leaks viewer metadata: %s (err=%v)", raw, err)
 	}
 
 	tag := TagToResponse(&model.Tag{ID: 1, Name: "golang"})

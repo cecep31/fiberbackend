@@ -13,28 +13,49 @@ import (
 
 type PostViewService interface {
 	RecordView(ctx context.Context, postID, userID string, ipAddress, userAgent *string) error
-	GetViewsByPostID(ctx context.Context, postID string, limit, offset int) ([]*dto.PostViewResponse, int64, error)
+	GetViewsByPostID(ctx context.Context, postID, requesterID string, isAdmin bool, limit, offset int) ([]*dto.PostViewResponse, int64, error)
 	GetViewStats(ctx context.Context, postID string) (*dto.PostViewStats, error)
 	HasUserViewedPost(ctx context.Context, postID, userID string) (bool, error)
 	GetMyPostsAnalytics(ctx context.Context, userID string, q *dto.MyPostsAnalyticsQuery) (*dto.MyPostsAnalyticsResponse, error)
 	GetMyPostsLikesByMonth(ctx context.Context, userID string, q *dto.MyPostsLikesByMonthQuery) (*dto.MyPostsLikesByMonthResponse, error)
 }
 
+// viewedMarkerTTL is how long a "user already viewed this post" marker lives in
+// the cache. It only short-circuits repeat RecordView calls; the database stays
+// authoritative, so an expired or missing marker just falls back to the query.
+const viewedMarkerTTL = 24 * time.Hour
+
+type postViewCache interface {
+	BuildKey(parts ...string) string
+	GetJSON(ctx context.Context, key string, dest any) (bool, error)
+	SetJSONWithTTL(ctx context.Context, key string, value any, ttl time.Duration) error
+}
+
+// maxAnalyticsRange bounds the start_date..end_date span of GetMyPostsAnalytics.
+const maxAnalyticsRange = 366 * 24 * time.Hour
+
 type postViewService struct {
 	postViewRepo repository.PostViewRepository
 	postRepo     repository.PostRepository
 	postLikeRepo repository.PostLikeRepository
+	cache        postViewCache
 }
 
 func NewPostViewService(
 	postViewRepo repository.PostViewRepository,
 	postRepo repository.PostRepository,
 	postLikeRepo repository.PostLikeRepository,
+	cache ...postViewCache,
 ) PostViewService {
+	var c postViewCache
+	if len(cache) > 0 {
+		c = cache[0]
+	}
 	return &postViewService{
 		postViewRepo: postViewRepo,
 		postRepo:     postRepo,
 		postLikeRepo: postLikeRepo,
+		cache:        c,
 	}
 }
 
@@ -43,8 +64,20 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 		return apperrors.ErrEmptyPostID
 	}
 
-	if _, err := s.postRepo.GetPostByID(ctx, postID); err != nil {
+	markerKey := s.viewedMarkerKey(postID, userID)
+	if markerKey != "" {
+		var viewed bool
+		if found, err := s.cache.GetJSON(ctx, markerKey, &viewed); err == nil && found && viewed {
+			return nil
+		}
+	}
+
+	post, err := s.postRepo.GetPostByID(ctx, postID)
+	if err != nil {
 		return fmt.Errorf("failed to verify post existence: %w", err)
+	}
+	if err := ensurePostInteractable(post); err != nil {
+		return err
 	}
 
 	if userID != "" {
@@ -53,6 +86,7 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 			return fmt.Errorf("failed to check if user viewed post: %w", err)
 		}
 		if hasViewed {
+			s.setViewedMarker(ctx, markerKey)
 			return nil
 		}
 	}
@@ -77,6 +111,7 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 	if err := s.postViewRepo.CreateView(ctx, view); err != nil {
 		return fmt.Errorf("failed to create view record: %w", err)
 	}
+	s.setViewedMarker(ctx, markerKey)
 
 	// view_count is maintained automatically by the database trigger
 	// (trigger_update_view_count_insert on post_views), so no app-level
@@ -87,9 +122,33 @@ func (s *postViewService) RecordView(ctx context.Context, postID, userID string,
 	return nil
 }
 
-func (s *postViewService) GetViewsByPostID(ctx context.Context, postID string, limit, offset int) ([]*dto.PostViewResponse, int64, error) {
+// GetViewsByPostID lists the raw view records of a post. Only the post's author
+// (or a super admin) may see who viewed it.
+// viewedMarkerKey returns "" when there is no cache or no user to dedupe on.
+func (s *postViewService) viewedMarkerKey(postID, userID string) string {
+	if s.cache == nil || userID == "" {
+		return ""
+	}
+	return s.cache.BuildKey("post_view", postID, userID)
+}
+
+func (s *postViewService) setViewedMarker(ctx context.Context, key string) {
+	if key != "" {
+		_ = s.cache.SetJSONWithTTL(ctx, key, true, viewedMarkerTTL)
+	}
+}
+
+func (s *postViewService) GetViewsByPostID(ctx context.Context, postID, requesterID string, isAdmin bool, limit, offset int) ([]*dto.PostViewResponse, int64, error) {
 	if postID == "" {
 		return nil, 0, apperrors.ErrEmptyPostID
+	}
+
+	post, err := s.postRepo.GetPostByID(ctx, postID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !isAdmin && (post.CreatedBy == nil || *post.CreatedBy != requesterID) {
+		return nil, 0, apperrors.ErrNotAuthor
 	}
 
 	if limit <= 0 {
@@ -161,6 +220,11 @@ func (s *postViewService) GetMyPostsAnalytics(ctx context.Context, userID string
 	}
 	if start.After(end) {
 		start, end = end, start
+	}
+	// view_trend holds one point per day, so an unbounded range would build
+	// an arbitrarily large response.
+	if end.Sub(start) > maxAnalyticsRange {
+		return nil, apperrors.ErrDateRangeTooLarge
 	}
 
 	startKey := start.Format("2006-01-02")

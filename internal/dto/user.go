@@ -159,6 +159,22 @@ func UserToCurrentUserResponse(u *model.User) *CurrentUserResponse {
 	}
 }
 
+type CreateUserRequest struct {
+	Username  string `json:"username" validate:"required,min=3,max=30"`
+	Email     string `json:"email" validate:"required,email,max=255"`
+	Password  string `json:"password" validate:"required,min=8,max=128"`
+	FirstName string `json:"first_name" validate:"omitempty,max=100"`
+	LastName  string `json:"last_name" validate:"omitempty,max=100"`
+}
+
+type UpdateUserRequest struct {
+	FirstName    string `json:"first_name" validate:"omitempty,max=100"`
+	LastName     string `json:"last_name" validate:"omitempty,max=100"`
+	Username     string `json:"username" validate:"required,min=3,max=30"`
+	Email        string `json:"email" validate:"required,email,max=255"`
+	IsSuperAdmin bool   `json:"is_super_admin"`
+}
+
 type UserDeletedFilter string
 
 const (
@@ -178,4 +194,27 @@ func ParseUserDeletedFilter(value string) (UserDeletedFilter, error) {
 	default:
 		return "", errors.New("deleted must be true, false, or all")
 	}
+}
+
+type UserListOrder string
+
+const (
+	UserListOrderCreatedAt  UserListOrder = "created_at"
+	UserListOrderLastLogged UserListOrder = "last_logged_at"
+	UserListOrderUsername   UserListOrder = "username"
+	UserListOrderEmail      UserListOrder = "email"
+	UserListOrderDefault    UserListOrder = UserListOrderCreatedAt
+)
+
+func ParseUserListOrder(value string) UserListOrder {
+	switch UserListOrder(value) {
+	case UserListOrderLastLogged, UserListOrderUsername, UserListOrderEmail:
+		return UserListOrder(value)
+	default:
+		return UserListOrderDefault
+	}
+}
+
+func ParseUserOrderDesc(value string) bool {
+	return value != "asc"
 }

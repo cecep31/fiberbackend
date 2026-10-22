@@ -7,8 +7,8 @@ import (
 
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
+	"fiberbackend/internal/platform/market"
 	"fiberbackend/internal/repository"
-	"fiberbackend/pkg/market"
 )
 
 const calendarDateFormat = "2006-01-02"

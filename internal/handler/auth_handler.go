@@ -49,7 +49,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return err
 	}
 
-	user, err := h.authService.Register(c.Context(), req.Email, req.Username, req.Password)
+	user, err := h.authService.Register(c.Context(), req.Email, req.Username, req.Password, req.FirstName, req.LastName)
 	if errors.Is(err, apperrors.ErrUserExists) {
 		return response.Conflict(c, "Registration failed", "Email or username already exists")
 	}
@@ -62,9 +62,11 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	h.activityService.LogActivity(c.Context(), &user.ID, model.ActivityRegister, model.StatusSuccess, ipAddress, userAgent, nil, nil)
 
 	return response.Created(c, "User registered successfully", map[string]any{
-		"id":       user.ID,
-		"email":    user.Email,
-		"username": user.Username,
+		"id":         user.ID,
+		"email":      user.Email,
+		"username":   user.Username,
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
 	})
 }
 
@@ -239,6 +241,64 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 	return response.Success(c, "Logout successful", nil)
 }
 
+// RevokeUserSessions terminates every session of one user. Admin only —
+// `Auth()` then `AuthAdmin()` on the route.
+func (h *AuthHandler) RevokeUserSessions(c fiber.Ctx) error {
+	actorID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	targetUserID := c.Params("userId")
+	if targetUserID == "" {
+		return response.BadRequest(c, "User ID is required", nil)
+	}
+
+	revoked, err := h.authService.RevokeUserSessions(
+		c.Context(), targetUserID, actorID, c.IP(), c.Get(fiber.HeaderUserAgent))
+	if errors.Is(err, apperrors.ErrInvalidUserID) {
+		return response.BadRequest(c, "Invalid user ID format", err)
+	}
+	if errors.Is(err, apperrors.ErrUserNotFound) {
+		return response.NotFound(c, "User not found", err)
+	}
+	if err != nil {
+		return response.InternalServerError(c, "Failed to revoke sessions", err)
+	}
+
+	return response.Success(c, "Sessions revoked successfully", map[string]any{
+		"user_id":          targetUserID,
+		"revoked_sessions": revoked,
+	})
+}
+
+// RevokeAllSessions logs every user out, including the administrator making the
+// call. Requires an explicit `confirm: true` in the body.
+func (h *AuthHandler) RevokeAllSessions(c fiber.Ctx) error {
+	actorID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	var req dto.RevokeAllSessionsRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request format", err)
+	}
+	if !req.Confirm {
+		return response.BadRequest(c, "Set \"confirm\": true to log out every user", nil)
+	}
+
+	revoked, err := h.authService.RevokeAllSessions(
+		c.Context(), actorID, c.IP(), c.Get(fiber.HeaderUserAgent))
+	if err != nil {
+		return response.InternalServerError(c, "Failed to revoke sessions", err)
+	}
+
+	return response.Success(c, "All sessions revoked successfully", map[string]any{
+		"revoked_sessions": revoked,
+	})
+}
+
 func (h *AuthHandler) GetProfile(c fiber.Ctx) error {
 	userID, ok := GetUserIDFromClaims(c)
 	if !ok {
@@ -260,6 +320,78 @@ func (h *AuthHandler) GetProfile(c fiber.Ctx) error {
 		"is_super_admin":  user.IsSuperAdmin,
 		"followers_count": user.FollowersCount,
 		"following_count": user.FollowingCount,
+	})
+}
+
+func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	var req dto.UpdateProfileRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request format", err)
+	}
+
+	if err := bindValidate(c, &req); err != nil {
+		return err
+	}
+
+	user, err := h.authService.UpdateProfile(c.Context(), userID, req.Username, req.FirstName, req.LastName)
+	if errors.Is(err, apperrors.ErrUserExists) {
+		return response.Conflict(c, "Failed to update profile", "Username already taken")
+	}
+	if errors.Is(err, apperrors.ErrUserNotFound) {
+		return response.NotFound(c, "Failed to update profile", err)
+	}
+	if err != nil {
+		return response.InternalServerError(c, "Failed to update profile", err)
+	}
+
+	return response.Success(c, "Profile updated successfully", map[string]any{
+		"id":              user.ID,
+		"email":           user.Email,
+		"username":        user.Username,
+		"first_name":      user.FirstName,
+		"last_name":       user.LastName,
+		"image":           user.Image,
+		"is_super_admin":  user.IsSuperAdmin,
+		"followers_count": user.FollowersCount,
+		"following_count": user.FollowingCount,
+	})
+}
+
+func (h *AuthHandler) DeleteAccount(c fiber.Ctx) error {
+	userID, ok := GetUserIDFromClaims(c)
+	if !ok {
+		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	if err := h.authService.DeleteAccount(c.Context(), userID); err != nil {
+		return response.InternalServerError(c, "Failed to delete account", err)
+	}
+
+	return response.Success(c, "Account deleted successfully", nil)
+}
+
+func (h *AuthHandler) CheckUsername(c fiber.Ctx) error {
+	var req dto.CheckUsernameRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request format", err)
+	}
+
+	if err := bindValidate(c, &req); err != nil {
+		return err
+	}
+
+	exists, err := h.authService.CheckUsernameExists(c.Context(), req.Username)
+	if err != nil {
+		return response.InternalServerError(c, "Failed to check username", err)
+	}
+
+	return response.Success(c, "Username availability checked", map[string]any{
+		"exists": exists,
 	})
 }
 

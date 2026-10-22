@@ -15,7 +15,7 @@ import (
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	GetByID(ctx context.Context, id string, deletedOnly bool) (*model.User, error)
-	GetUsers(ctx context.Context, offset int, limit int, deletedFilter dto.UserDeletedFilter) ([]*model.User, int64, error)
+	GetUsers(ctx context.Context, offset int, limit int, deletedFilter dto.UserDeletedFilter, orderBy dto.UserListOrder, orderDesc bool) ([]*model.User, int64, error)
 	GetUsersByEmail(ctx context.Context, email string) ([]*model.User, error)
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
@@ -65,7 +65,7 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 
 func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 	result := r.db.WithContext(ctx).Model(user).
-		Select("Email", "FirstName", "LastName", "Username", "IsSuperAdmin", "Password", "LastLoggedAt").
+		Select("Email", "FirstName", "LastName", "Username", "IsSuperAdmin", "Password", "LastLoggedAt", "Image").
 		Where("id = ?", user.ID).
 		Updates(user)
 
@@ -94,7 +94,7 @@ func (r *userRepository) GetByID(ctx context.Context, id string, deletedOnly boo
 	return &user, nil
 }
 
-func (r *userRepository) GetUsers(ctx context.Context, offset, limit int, deletedFilter dto.UserDeletedFilter) ([]*model.User, int64, error) {
+func (r *userRepository) GetUsers(ctx context.Context, offset, limit int, deletedFilter dto.UserDeletedFilter, orderBy dto.UserListOrder, orderDesc bool) ([]*model.User, int64, error) {
 	var users []*model.User
 	var totalCount int64
 
@@ -118,8 +118,21 @@ func (r *userRepository) GetUsers(ctx context.Context, offset, limit int, delete
 	}
 
 	findQuery := query.Offset(offset).Limit(limit)
-	if deletedFilter == dto.UserDeletedFilterOnly {
-		findQuery = findQuery.Order("deleted_at DESC")
+	direction := "DESC"
+	if !orderDesc {
+		direction = "ASC"
+	}
+	// NULLS LAST so users who never logged in stay at the bottom
+	// regardless of direction (Postgres defaults to NULLS FIRST on DESC).
+	switch orderBy {
+	case dto.UserListOrderLastLogged, dto.UserListOrderUsername, dto.UserListOrderEmail:
+		findQuery = findQuery.Order(string(orderBy) + " " + direction + " NULLS LAST")
+	default:
+		if deletedFilter == dto.UserDeletedFilterOnly {
+			findQuery = findQuery.Order("deleted_at DESC")
+		} else {
+			findQuery = findQuery.Order("created_at " + direction + " NULLS LAST")
+		}
 	}
 
 	err := findQuery.Find(&users).Error
@@ -132,7 +145,7 @@ func (r *userRepository) GetUsers(ctx context.Context, offset, limit int, delete
 
 func (r *userRepository) GetUsersByEmail(ctx context.Context, email string) ([]*model.User, error) {
 	var users []*model.User
-	err := r.db.WithContext(ctx).Where("email = ?", email).Find(&users).Error
+	err := r.db.WithContext(ctx).Where("LOWER(email) = LOWER(?)", email).Find(&users).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get users by email: %w", err)
 	}
@@ -165,7 +178,7 @@ func (r *userRepository) RestoreByID(ctx context.Context, id string) error {
 	var emailTaken bool
 	err = r.db.WithContext(ctx).Model(&model.User{}).
 		Select("1").
-		Where("email = ? AND id != ?", user.Email, id).
+		Where("LOWER(email) = LOWER(?) AND id != ?", user.Email, id).
 		Limit(1).
 		Scan(&emailTaken).Error
 	if err != nil {
@@ -204,7 +217,7 @@ func (r *userRepository) Exists(ctx context.Context, email string) (bool, error)
 	var exists bool
 	err := r.db.WithContext(ctx).Model((*model.User)(nil)).
 		Select("1").
-		Where("email = ?", email).
+		Where("LOWER(email) = LOWER(?)", email).
 		Limit(1).
 		Scan(&exists).Error
 	if err != nil {
@@ -215,7 +228,7 @@ func (r *userRepository) Exists(ctx context.Context, email string) (bool, error)
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
+	err := r.db.WithContext(ctx).Where("LOWER(email) = LOWER(?)", email).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperrors.ErrUserNotFound

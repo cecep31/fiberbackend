@@ -8,12 +8,14 @@ import (
 	"fiberbackend/internal/platform/cache"
 	"fiberbackend/internal/platform/database"
 	"fiberbackend/internal/platform/email"
+	"fiberbackend/internal/platform/market"
+	"fiberbackend/internal/platform/openrouter"
 	"fiberbackend/internal/platform/queue"
+	"fiberbackend/internal/platform/realtime"
 	"fiberbackend/internal/platform/storage"
 	"fiberbackend/internal/repository"
 	"fiberbackend/internal/routes"
 	"fiberbackend/internal/service"
-	"fiberbackend/pkg/market"
 
 	"gorm.io/gorm"
 )
@@ -24,13 +26,17 @@ type Container struct {
 	Cleanup *CleanupManager
 	Routes  *routes.Routes
 	db      *gorm.DB
+	hub     *realtime.Hub
 }
 
 // NewContainer creates a manually wired application container.
 func NewContainer(cfg *config.Config) (*Container, error) {
 	cleanup := NewCleanupManager()
 
-	db := database.NewDatabase(cfg)
+	db, err := database.NewDatabase(cfg)
+	if err != nil {
+		return nil, err
+	}
 	cleanup.Register(func() error {
 		sqlDB, err := db.DB()
 		if err != nil {
@@ -45,6 +51,12 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 			return redisCache.Close()
 		})
 	}
+
+	// Realtime fan-out for guild chat SSE streams; relays through Redis pub/sub
+	// when a cache is configured and keeps in-process subscribers otherwise.
+	hub := realtime.NewHub(redisCache)
+	hub.Start()
+	cleanup.Register(hub.Close)
 
 	taskQueue := queue.NewService(cfg.Queue)
 	cleanup.Register(func() error {
@@ -73,37 +85,48 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	notificationRepo := repository.NewNotificationRepository(db)
 	authActivityLogRepo := repository.NewAuthActivityLogRepository(db)
 	passwordResetTokenRepo := repository.NewPasswordResetTokenRepository(db)
-	reportRepo := repository.NewReportRepository(db)
 	corporateActionRepo := repository.NewCorporateActionRepository(db)
+	postReportRepo := repository.NewPostReportRepository(db)
+	postStatsRepo := repository.NewPostStatsRepository(db)
+	tagStatsRepo := repository.NewTagStatsRepository(db)
+	userStatsRepo := repository.NewUserStatsRepository(db)
+	guildRepo := repository.NewGuildRepository(db)
+	guildChannelRepo := repository.NewGuildChannelRepository(db)
 
 	authActivityService := service.NewAuthActivityService(authActivityLogRepo)
-	openRouterService := service.NewOpenRouterService(cfg.OpenRouter)
-	userService := service.NewUserService(userRepo)
+	openRouterClient := openrouter.NewClient(cfg.OpenRouter)
+	userService := service.NewUserService(userRepo, s3Storage)
 	tagService := service.NewTagService(tagRepo, redisCache)
 	postService := service.NewPostService(postRepo, tagService, s3Storage, redisCache)
 	authService := service.NewAuthService(authRepo, userRepo, sessionRepo, passwordResetTokenRepo, authActivityService, cfg, redisCache, emailService)
 	notificationService := service.NewNotificationService(notificationRepo)
 	commentService := service.NewCommentService(commentRepo, postRepo, notificationService)
-	postViewService := service.NewPostViewService(postViewRepo, postRepo, postLikeRepo)
+	postViewService := service.NewPostViewService(postViewRepo, postRepo, postLikeRepo, redisCache)
 	postLikeService := service.NewPostLikeService(postLikeRepo, postRepo)
 	userFollowService := service.NewUserFollowService(userFollowRepo, userRepo, notificationService)
-	chatConversationService := service.NewChatConversationService(chatConversationRepo, openRouterService, cfg)
-	yahooClient := market.NewYahooClient(nil)
-	holdingService := service.NewHoldingService(holdingRepo, yahooClient, redisCache)
-	exchangeRateService := service.NewExchangeRateService(yahooClient, redisCache)
+	chatConversationService := service.NewChatConversationService(chatConversationRepo, openRouterClient, cfg)
+	rawQuoteClient := market.NewRapidAPIQuoteClient(cfg.MarketData.RapidAPIKey, nil)
+	quoteClient := market.NewCachedQuoteClient(rawQuoteClient, redisCache)
+	holdingService := service.NewHoldingService(holdingRepo, quoteClient, redisCache)
+	exchangeRateService := service.NewExchangeRateService(quoteClient, redisCache)
 	bookmarkService := service.NewBookmarkService(bookmarkRepo, postRepo)
-	reportService := service.NewReportService(reportRepo)
+	postReportService := service.NewPostReportService(postReportRepo, postRepo)
+	postStatsService := service.NewPostStatsService(postStatsRepo)
+	tagStatsService := service.NewTagStatsService(tagStatsRepo)
+	userStatsService := service.NewUserStatsService(userStatsRepo)
+	guildService := service.NewGuildService(guildRepo)
+	guildChannelService := service.NewGuildChannelService(guildChannelRepo, hub)
 
 	// Corporate actions: IDX
-	idxCorporateClient := market.NewRapidAPIIDXClient(cfg.MarketData.RapidAPIIDXKey, nil)
+	idxCorporateClient := market.NewRapidAPIIDXClient(cfg.MarketData.RapidAPIKey, nil)
 	corporateActionService := service.NewCorporateActionService(idxCorporateClient, corporateActionRepo)
 
 	userHandler := handler.NewUserHandler(userService, userFollowService)
 	postHandler := handler.NewPostHandler(postService, postViewService)
 	authHandler := handler.NewAuthHandler(authService, authActivityService, cfg.Frontend)
 	tagHandler := handler.NewTagHandler(tagService)
-	commentHandler := handler.NewCommentHandler(commentService)
-	postViewHandler := handler.NewPostViewHandler(postViewService)
+	commentHandler := handler.NewCommentHandler(commentService, userService)
+	postViewHandler := handler.NewPostViewHandler(postViewService, userService)
 	postLikeHandler := handler.NewPostLikeHandler(postLikeService)
 	userFollowHandler := handler.NewUserFollowHandler(userFollowService)
 	chatConversationHandler := handler.NewChatConversationHandler(chatConversationService)
@@ -111,8 +134,13 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	exchangeRateHandler := handler.NewExchangeRateHandler(exchangeRateService)
 	bookmarkHandler := handler.NewBookmarkHandler(bookmarkService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
-	reportHandler := handler.NewReportHandler(reportService)
 	corporateActionHandler := handler.NewCorporateActionHandler(corporateActionService)
+	postReportHandler := handler.NewPostReportHandler(postReportService)
+	postStatsHandler := handler.NewPostStatsHandler(postStatsService)
+	tagStatsHandler := handler.NewTagStatsHandler(tagStatsService)
+	userStatsHandler := handler.NewUserStatsHandler(userStatsService)
+	guildHandler := handler.NewGuildHandler(guildService)
+	guildChannelHandler := handler.NewGuildChannelHandler(guildChannelService)
 
 	authMiddleware := middleware.NewAuthMiddleware(cfg, userService)
 	appRoutes := routes.NewRoutes(
@@ -132,8 +160,13 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		exchangeRateHandler,
 		bookmarkHandler,
 		notificationHandler,
-		reportHandler,
 		corporateActionHandler,
+		guildHandler,
+		guildChannelHandler,
+		postReportHandler,
+		postStatsHandler,
+		tagStatsHandler,
+		userStatsHandler,
 	)
 
 	return &Container{
@@ -141,6 +174,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		Cleanup: cleanup,
 		Routes:  appRoutes,
 		db:      db,
+		hub:     hub,
 	}, nil
 }
 
@@ -159,4 +193,13 @@ func GetCleanupManager(container *Container) (*CleanupManager, error) {
 		return nil, nil
 	}
 	return container.Cleanup, nil
+}
+
+// CloseStreams ends every open realtime (SSE) stream. Register it with the
+// server shutdown hook so clients disconnect cleanly.
+func (c *Container) CloseStreams() {
+	if c == nil || c.hub == nil {
+		return
+	}
+	_ = c.hub.Close()
 }

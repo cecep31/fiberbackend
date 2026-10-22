@@ -2,8 +2,9 @@ package dto
 
 import (
 	"encoding/json"
-	"fiberbackend/internal/model"
 	"time"
+
+	"fiberbackend/internal/model"
 )
 
 type CreateNotificationRequest struct {

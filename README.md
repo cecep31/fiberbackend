@@ -4,12 +4,14 @@ A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL
 
 ## Core Features
 
-- **User Management**: Auth (JWT + DB-backed refresh sessions), GitHub OAuth, password reset (SMTP/queue), activity logs, profiles, following.
+- **User Management**: Auth (JWT + rotating DB-backed refresh tokens, RFC 9700), GitHub OAuth, password reset (SMTP/queue), activity logs, profiles, following.
 - **Content Management**: Posts with rich text, tags, comments, bookmarks (+ folders), post views, likes, sitemap & trending.
-- **Analytics**: Post analytics + likes-by-month, admin reports (overview/user/post/engagement), holdings dashboards.
+- **Guilds**: Discord-style channels and messages with realtime updates over SSE (one stream per guild).
+- **Moderation**: post reports, admin hide/unhide, comment spam guard.
+- **Analytics**: Post/tag/user stats + engagement, likes-by-month, admin reports (overview/user/post/engagement), holdings dashboards.
 - **Real-time Chat**: Conversational AI via OpenRouter with SSE streaming and message history.
-- **Finance Tools**: Holdings with live price sync (Yahoo), monthly compare/trends, IDX corporate-action calendar, exchange rates.
-- **Security**: JWT auth (DB-checked admin), per-endpoint rate limiting, input validation (422), helmet security headers, no error leakage.
+- **Finance Tools**: Holdings with live price sync (Yahoo via RapidAPI), monthly compare/trends, IDX corporate-action calendar, exchange rates.
+- **Security**: JWT auth (DB-checked admin), per-endpoint rate limiting, input validation (422), helmet security headers, no error leakage, anti-spam guards.
 - **Performance**: Valkey/Redis caching, connection pooling, GORM slow-query logging.
 - **Infra**: Goose migrations, Docker (multi-stage, non-root, HEALTHCHECK), Docker Compose local services, GitHub Actions CI, Fly.io deploy.
 
@@ -28,7 +30,7 @@ A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL
 
 ```bash
 # 1. Setup environment
-cp .env.example .env       # set JWT_SECRET (>= 32 chars)
+cp .env.example .env       # set JWT_SECRET (>= 32 chars), REDIS_URL=redis://localhost:6379, S3_USE_SSL=false
 
 # 2. Start local services (Postgres 18, Valkey, MinIO)
 docker compose up -d --wait
@@ -67,12 +69,12 @@ Modular layered architecture with manual dependency injection:
 - **`internal/model/`**: GORM entities and shared domain models.
 - **`internal/dto/`**: Request/response structs and converters.
 - **`internal/apperror/`**: Shared application error sentinels.
-- **`internal/platform/`**: App-owned infrastructure adapters (cache, database, email, queue, storage).
-- **`pkg/`**: Reusable helper packages (applog, market, response, validator).
+- **`internal/platform/`**: App-owned infrastructure adapters (cache, database, email, openrouter, queue, realtime, storage).
+- **`pkg/`**: Reusable helper packages (antispam, applog, market, password, response, slug, uid, validator).
 
 ## API Documentation
 
-Full HTTP API reference lives in [`docs/api/README.md`](docs/api/README.md), with per-module docs for auth, users, posts, tags, chat, holdings, exchange rates, bookmarks, notifications, and admin reports.
+Full HTTP API reference lives in [`docs/api/README.md`](docs/api/README.md), with per-module docs for auth, users, posts (incl. moderation), tags, chat, guilds, holdings, exchange rates, bookmarks, notifications, and admin stats.
 
 ### Standardized Responses
 

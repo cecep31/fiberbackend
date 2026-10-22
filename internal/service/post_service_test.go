@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"mime/multipart"
 	"testing"
 
@@ -74,7 +75,7 @@ func (m *mockCacheStore) SetJSON(ctx context.Context, key string, value any) err
 func TestUploadImagePostsRejectsFilesLargerThanOneMiB(t *testing.T) {
 	svc := NewPostService(&mockPostRepo{}, nil, nil, nil)
 
-	err := svc.UploadImagePosts(context.Background(), &multipart.FileHeader{
+	_, err := svc.UploadImagePosts(context.Background(), &multipart.FileHeader{
 		Filename: "large.jpg",
 		Size:     maxPostImageSize + 1,
 	})
@@ -211,21 +212,64 @@ func TestCreatePost(t *testing.T) {
 func TestUpdatePost(t *testing.T) {
 	ctx := context.Background()
 	postID := "post-uuid"
-	t.Run("success", func(t *testing.T) {
-		title := "Updated Title"
+	updatedTitle := "Updated Title"
+
+	t.Run("update title without tags", func(t *testing.T) {
 		repo := &mockPostRepo{
 			updatePostFn: func(ctx context.Context, id string, updates map[string]any) (*model.Post, error) {
-				return &model.Post{ID: id, Title: &title}, nil
+				if id != postID {
+					t.Fatalf("expected post ID %s, got %s", postID, id)
+				}
+				if updates["title"] != updatedTitle {
+					t.Fatalf("expected title %s, got %v", updatedTitle, updates["title"])
+				}
+				return &model.Post{ID: id, Title: &updatedTitle}, nil
 			},
 		}
+
 		svc := NewPostService(repo, nil, nil, nil)
-		req := &dto.UpdatePostRequest{Title: "Updated Title"}
-		resp, err := svc.UpdatePost(ctx, postID, req)
+		resp, err := svc.UpdatePost(ctx, postID, &dto.UpdatePostRequest{
+			Title: updatedTitle,
+		})
 		if err != nil {
 			t.Fatalf("expected nil, got %v", err)
 		}
-		if *resp.Title != title {
-			t.Fatalf("expected Title %s, got %s", title, *resp.Title)
+		if resp.ID != postID || *resp.Title != updatedTitle {
+			t.Fatalf("unexpected response: %v", resp)
+		}
+	})
+
+	t.Run("update with tags", func(t *testing.T) {
+		tagServiceCalled := false
+		tagSvc := &mockTagService{
+			findOrCreateByNameFn: func(ctx context.Context, name string) (*model.Tag, error) {
+				tagServiceCalled = true
+				return &model.Tag{ID: 1, Name: name}, nil
+			},
+		}
+
+		repo := &mockPostRepo{
+			updatePostWithTagsFn: func(ctx context.Context, id string, updates map[string]any, tags []model.Tag) (*model.Post, error) {
+				if len(tags) != 1 || tags[0].Name != "golang" {
+					t.Fatalf("expected tag 'golang', got %v", tags)
+				}
+				return &model.Post{ID: id, Title: &updatedTitle, Tags: tags}, nil
+			},
+		}
+
+		svc := NewPostService(repo, tagSvc, nil, nil)
+		resp, err := svc.UpdatePost(ctx, postID, &dto.UpdatePostRequest{
+			Title: updatedTitle,
+			Tags:  []string{"golang"},
+		})
+		if err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+		if !tagServiceCalled {
+			t.Fatalf("expected findOrCreateByName to be called")
+		}
+		if len(resp.Tags) != 1 || resp.Tags[0].Name != "golang" {
+			t.Fatalf("expected tag in response, got %v", resp.Tags)
 		}
 	})
 }
@@ -311,6 +355,41 @@ func TestGetPostsTrending(t *testing.T) {
 		}
 		if len(resp) != 1 || *resp[0].Title != title {
 			t.Fatalf("unexpected response: %v", resp)
+		}
+	})
+}
+
+type mockFileUploader struct {
+	saveFn func(ctx context.Context, path string, file io.Reader, contentType string) error
+}
+
+func (m *mockFileUploader) Save(ctx context.Context, path string, file io.Reader, contentType string) error {
+	if m.saveFn != nil {
+		return m.saveFn(ctx, path, file, contentType)
+	}
+	return nil
+}
+
+func TestUploadImagePosts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil file", func(t *testing.T) {
+		svc := NewPostService(&mockPostRepo{}, nil, &mockFileUploader{}, nil)
+		_, err := svc.UploadImagePosts(ctx, nil)
+		if !errors.Is(err, apperrors.ErrFileNil) {
+			t.Fatalf("expected ErrFileNil, got %v", err)
+		}
+	})
+
+	t.Run("storage nil", func(t *testing.T) {
+		svc := NewPostService(&mockPostRepo{}, nil, nil, nil)
+		header := &multipart.FileHeader{
+			Filename: "test.jpg",
+			Size:     100,
+		}
+		_, err := svc.UploadImagePosts(ctx, header)
+		if !errors.Is(err, apperrors.ErrStorageUnavailable) {
+			t.Fatalf("expected ErrStorageUnavailable, got %v", err)
 		}
 	})
 }
