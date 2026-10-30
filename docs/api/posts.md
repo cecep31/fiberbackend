@@ -71,7 +71,7 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 | `body` | string | Yes | min 10 |
 | `photo_url` | string | No | |
 | `published` | boolean | No | default false |
-| `tags` | string[] | No | Tag names |
+| `tags` | string[] | No | Tag names; each is trimmed, blank names are dropped and duplicates removed (first occurrence wins, case-sensitive) |
 
 **Success - 201** - `data`: `{ "id": "uuid" }`.
 
@@ -82,7 +82,7 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 | Param | Description |
 |-------|-------------|
 | `search` | Search text |
-| `sort_by` | `id`, `title`, `created_at`, `updated_at`, `view_count`, `like_count` |
+| `sort_by` | `id`, `title`, `created_at`, `updated_at`, `view_count`, `like_count`, `bookmark_count` |
 | `sort_order` | `asc` / `desc` (default `desc`) |
 | `start_date`, `end_date` | Date filters |
 | `created_by` | Author UUID |
@@ -100,11 +100,15 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 
 **Query:** `limit` (default 10, max 100).
 
+Ranked by `like_count * 2 + bookmark_count * 2 + view_count` (a missing counter counts as 0), newest first on ties.
+
 ### GET `/api/posts/username/:username` and `/api/posts/tag/:tag`
 
 Paginated published posts for a user or tag name.
 
 **Query:** `limit`, `offset` (default limit 10, max 100).
+
+`/tag/:tag` also accepts `sort_by` (alias `orderBy`; same columns as `GET /api/posts`, default `created_at`) and `sort_order` (alias `orderDirection`; `asc` / `desc`, default `desc`). Unknown values fall back to the defaults instead of erroring.
 
 ### GET `/api/posts/me` and `/feed/for-you`
 
@@ -222,7 +226,7 @@ Full detail for one post. **Super admin auth required.**
 
 Update a post by ID. **Super admin auth required.**
 
-**Body (`UpdatePostRequest`)** - all fields are optional; `published` is a boolean pointer.
+**Body (`UpdatePostRequest`)** - all fields are optional; `published` is a boolean pointer. `tags` omitted keeps the current tags; when present it replaces them (`[]` clears), after the same trim / drop-blank / de-duplicate normalization as create. The owner route `PUT /api/posts/me/:id` behaves the same.
 
 **Common errors**
 
@@ -269,6 +273,10 @@ POST and PUT accept the same body:
 
 **Success - 201 (POST) / 200 (PUT)** - `data`: `CommentResponse`.
 
+### PUT / DELETE `/api/posts/:id/comments/:comment_id`
+
+Both `:id` and `:comment_id` must be UUIDs (400 `Invalid post ID` / `Invalid comment ID`). The comment must belong to post `:id`; otherwise 404 `Comment not found` (checked before ownership). Editing is owner-only (403); deleting is owner or super admin.
+
 ---
 
 ## Views - `/api/posts/:id/view*`
@@ -286,6 +294,8 @@ Record a view for the logged-in user.
 
 ### GET `/api/posts/:id/view-stats`
 
+`:id` must be a UUID (400 `Invalid post ID`); a missing or hidden post returns 404.
+
 **Success - 200** - `data`:
 
 ```json
@@ -299,6 +309,8 @@ Record a view for the logged-in user.
 ```
 
 ### GET `/api/posts/:id/viewed`
+
+`:id` must be a UUID (400 `Invalid post ID`); a missing or hidden post returns 404.
 
 **Success - 200** - `data`: `{ "has_viewed": true }`.
 

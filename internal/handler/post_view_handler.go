@@ -3,6 +3,7 @@ package handler
 import (
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -64,8 +65,8 @@ func (h *PostViewHandler) GetPostViews(c fiber.Ctx) error {
 
 func (h *PostViewHandler) GetPostViewStats(c fiber.Ctx) error {
 	postID := c.Params("id")
-	if postID == "" {
-		return response.BadRequest(c, "Post ID is required", nil)
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
 	}
 
 	stats, err := h.postViewService.GetViewStats(c.Context(), postID)
@@ -78,8 +79,8 @@ func (h *PostViewHandler) GetPostViewStats(c fiber.Ctx) error {
 
 func (h *PostViewHandler) CheckUserViewed(c fiber.Ctx) error {
 	postID := c.Params("id")
-	if postID == "" {
-		return response.BadRequest(c, "Post ID is required", nil)
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)

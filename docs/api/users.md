@@ -2,6 +2,8 @@
 
 User profiles, admin user lists, follow/unfollow, and social statistics.
 
+Every `:id` path segment must be a canonical lowercase UUID (`8-4-4-4-12`). Anything else returns **400** `{"success": false, "message": "Invalid user ID", "error": "invalid user ID format"}` before the database is queried.
+
 ## Data Types
 
 ### `UserResponse` (admin routes: `GET /`, `GET /:id`)
@@ -10,7 +12,7 @@ User profiles, admin user lists, follow/unfollow, and social statistics.
 |-------|------|-------------|
 | `id` | string (UUID) | |
 | `email` | string \| null | Omitted on public/general routes; present only on admin routes or `/me` |
-| `name` | string | Combined first + last name |
+| `name` | string | `first last` when both are set, otherwise whichever one is set; `""` when neither is |
 | `username` | string \| null | |
 | `image` | string \| null | Avatar URL |
 | `first_name` | string \| null | |
@@ -61,6 +63,8 @@ Public profile shape of `UserResponse`. Omits `email`, `is_super_admin`, `delete
 | GET | `/username/:username` | No | By username |
 | GET | `/me` | Bearer | User from token |
 | GET | `` | Bearer + **super admin** | User list (paginated); soft-delete filter via query |
+| PUT | `/:id` | Bearer + **super admin** | Update a user |
+| POST | `/me/image` | Bearer | Upload or replace the caller's avatar |
 | DELETE | `/:id` | Bearer + **super admin** | Soft-delete user |
 | POST | `/:id/restore` | Bearer + **super admin** | Restore a soft-deleted user |
 
@@ -80,7 +84,7 @@ Public profile shape of `UserResponse`. Omits `email`, `is_super_admin`, `delete
 
 Any `deleted` value other than `true`, `false`, `all`, or empty returns **400 Bad Request**.
 
-**Success - 200** - `data`: `UserResponse[]`, `meta`: pagination.
+**Success - 200** - `data`: `UserResponse[]` (`[]` for an empty page, never `null`), `meta`: pagination.
 
 Examples:
 
@@ -110,6 +114,33 @@ GET /api/users/<uuid>?deleted=true
 ### GET `/api/users/username/:username`
 
 **Success - 200** - `data`: `UserResponse` (public profile shape).
+
+### PUT `/api/users/:id` (admin)
+
+**Body**
+
+| Field | Type | Required | Behaviour |
+|-------|------|----------|-----------|
+| `username` | string | Yes | 3-30 chars |
+| `email` | string | Yes | Email, max 255 |
+| `first_name` | string \| null | No | Max 100. Omitted or `null` stores NULL; a string (even `""`) is stored |
+| `last_name` | string \| null | No | Max 100. Omitted or `null` stores NULL; a string (even `""`) is stored |
+| `is_super_admin` | boolean \| null | No | Omitted or `null` keeps the stored value; `true`/`false` sets it |
+
+**Success - 200** - `data`: updated `UserResponse`. **404** unknown user, **409** email/username taken, **422** validation.
+
+### POST `/api/users/me/image`
+
+Multipart field `avatar`: JPEG, PNG, GIF or WebP (sniffed from the bytes), max 5 MB.
+
+**Success - 200** - message `Profile picture updated successfully`, `data`: `{ "image": "users/avatars/<key>" }`.
+
+**Errors**
+
+| Status | Condition |
+|--------|-----------|
+| 400 | No file, unsupported type, or storage not configured |
+| 413 | File over 5 MB, or `Content-Length` over 5 MB + 64 KB (checked before parsing). `message` and `error` are both `Avatar is too large (max 5 MB)` |
 
 ### DELETE `/api/users/:id` (admin)
 
@@ -167,11 +198,21 @@ POST /api/users/<uuid>/restore
 }
 ```
 
+**Errors** (message `Failed to follow user`)
+
+| Status | `error` |
+|--------|---------|
+| 400 | `cannot follow yourself` |
+| 404 | `user not found` (follower or target) |
+| 409 | `already following this user` |
+
 ### DELETE `/api/users/:id/follow`
 
 Unfollow the user with the UUID in the path.
 
 **Success - 200** - `data`: `FollowResponse` (same shape as follow).
+
+**Errors:** **400** `not following this user` (message `Failed to unfollow user`).
 
 ### GET `/api/users/:id/follow-status`
 
@@ -185,13 +226,15 @@ Unfollow the user with the UUID in the path.
 
 ### GET `/api/users/:id/mutual-follows`
 
-**Success - 200** - `data`: `UserResponse[]`.
+**Success - 200** - `data`: `UserResponse[]`: users both the caller and `:id` follow, ordered by `username`, not paginated.
 
 ### GET `/api/users/:id/followers` and `/:id/following`
 
-**Query:** `limit`, `offset`.
+**Query:** `limit` (default 10, max 100), `offset`.
 
-**Success - 200** - `data`: `UserResponse[]`, `meta`: pagination.
+**Success - 200** - `data`: `UserResponse[]`, newest follow first, `meta`: pagination.
+
+Follow lists (including mutual follows) only use live follow rows, so an unfollowed user drops out. Soft-deleted users are excluded from the rows and from `total`. Each item embeds `profile`; `is_following` is never set.
 
 ### GET `/api/users/:id/follow-stats`
 
@@ -205,4 +248,6 @@ Unfollow the user with the UUID in the path.
 }
 ```
 
-**Note:** Some follow domain errors (user not found, already following, etc.) can currently return **500** from the handler layer instead of a specific 4xx.
+Counts are computed live from `user_follows` rows that are not soft-deleted. **404** (`error`: `user not found`) when no active user has this ID.
+
+The `followers_count`/`following_count` columns on `users` (used by `UserResponse`) are kept by DB triggers, which since migration `20261029120000` also handle soft unfollows.

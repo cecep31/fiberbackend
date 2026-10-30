@@ -2,15 +2,20 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
+	apperrors "fiberbackend/internal/apperror"
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/model"
 	"fiberbackend/internal/service"
+	"fiberbackend/pkg/response"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
@@ -202,5 +207,83 @@ func TestParseMonthlyQuery_NormalizesInvertedDifferentYear(t *testing.T) {
 	}
 	if q.StartMonth != 12 || q.StartYear != 2025 || q.EndMonth != 1 || q.EndYear != 2024 {
 		t.Fatalf("unexpected query: %+v", q)
+	}
+}
+
+func TestParseMonthlyQuery_RejectsOutOfBoundsYears(t *testing.T) {
+	next := strconv.Itoa(time.Now().Year() + 2)
+	for _, qs := range []string{
+		"startYear=abc",
+		"startYear=1989",
+		"startYear=" + next,
+		"startYear=2147483647&endYear=1990",
+		"endYear=1.5",
+		"endYear=1989",
+		"endYear=" + next,
+	} {
+		if _, err := runParseMonthlyQuery("/api/holdings/monthly?" + qs); !errors.Is(err, apperrors.ErrHoldingInvalidRange) {
+			t.Errorf("%s: expected ErrHoldingInvalidRange, got %v", qs, err)
+		}
+	}
+}
+
+func TestParseMonthlyQuery_AcceptsYearBounds(t *testing.T) {
+	maxYear := strconv.Itoa(time.Now().Year() + 1)
+	q, err := runParseMonthlyQuery("/api/holdings/monthly?startMonth=1&startYear=" + maxYear + "&endMonth=1&endYear=1990")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if q.StartYear != time.Now().Year()+1 || q.EndYear != 1990 {
+		t.Fatalf("unexpected query: %+v", q)
+	}
+	// Months stay lenient: garbage is ignored, not rejected.
+	if _, err := runParseMonthlyQuery("/api/holdings/monthly?startMonth=abc&endMonth=13"); err != nil {
+		t.Fatalf("unexpected error for lenient months: %v", err)
+	}
+}
+
+func TestHoldingHandler_GetMonthlyData_InvalidYear400(t *testing.T) {
+	h := NewHoldingHandler(&mockHoldingService{
+		getMonthlyDataFn: func(ctx context.Context, userID string, q *dto.HoldingMonthlyQuery) ([]dto.HoldingMonthlyDataResponse, error) {
+			t.Error("service must not be called for an invalid year")
+			return nil, nil
+		},
+	})
+	status, raw := runHoldingGet(t, h, "/api/holdings/monthly?startYear=1800", true)
+	var body response.APIResponse
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if status != http.StatusBadRequest || body.Message != "Invalid monthly range" || body.Error != apperrors.ErrHoldingInvalidRange.Error() {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+}
+
+func TestHoldingHandler_RespondHoldingError_BadRequestMappings(t *testing.T) {
+	h := NewHoldingHandler(&mockHoldingService{})
+	for _, tc := range []struct {
+		err       error
+		wantError string
+	}{
+		{apperrors.ErrHoldingRangeTooLarge, "requested month/year range is too large"},
+		{&apperrors.HoldingInvalidDecimalError{Field: "current_value"}, "Invalid decimal value for current_value"},
+	} {
+		app := fiber.New()
+		app.Get("/", func(c fiber.Ctx) error {
+			return h.respondHoldingError(c, "Failed to get monthly data", tc.err)
+		})
+		resp, err := app.Test(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
+		if err != nil {
+			t.Fatalf("app.Test failed: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var body response.APIResponse
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest || body.Message != "Failed to get monthly data" || body.Error != tc.wantError {
+			t.Fatalf("%v: status=%d body=%s", tc.err, resp.StatusCode, raw)
+		}
 	}
 }

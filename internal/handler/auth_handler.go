@@ -45,8 +45,8 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	user, err := h.authService.Register(c.Context(), req.Email, req.Username, req.Password, req.FirstName, req.LastName)
@@ -76,8 +76,8 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &loginReq); err != nil {
-		return err
+	if err := validate.Validate(&loginReq); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	ipAddress := c.IP()
@@ -108,8 +108,8 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	ipAddress := c.IP()
@@ -129,8 +129,8 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	ipAddress := c.IP()
@@ -159,8 +159,8 @@ func (h *AuthHandler) RefreshToken(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	ipAddress := c.IP()
@@ -199,8 +199,8 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	ipAddress := c.IP()
@@ -223,15 +223,15 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userID, _ := GetUserIDFromClaims(c)
 	ipAddress := c.IP()
 	userAgent := c.Get(fiber.HeaderUserAgent)
 
-	err := h.authService.Logout(c.Context(), req.RefreshToken)
+	err := h.authService.Logout(c.Context(), userID, req.RefreshToken)
 	if err != nil {
 		return response.Success(c, "Logout successful", nil)
 	}
@@ -307,6 +307,9 @@ func (h *AuthHandler) GetProfile(c fiber.Ctx) error {
 
 	user, err := h.authService.GetProfile(c.Context(), userID)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrUserNotFound) {
+			return response.NotFound(c, "User not found", err)
+		}
 		return response.InternalServerError(c, "Failed to get profile", err)
 	}
 
@@ -334,8 +337,8 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	user, err := h.authService.UpdateProfile(c.Context(), userID, req.Username, req.FirstName, req.LastName)
@@ -381,8 +384,8 @@ func (h *AuthHandler) CheckUsername(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	exists, err := h.authService.CheckUsernameExists(c.Context(), req.Username)
@@ -535,8 +538,8 @@ func (h *AuthHandler) ExchangeOAuthCode(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	accessToken, refreshToken, user, err := h.authService.ExchangeOAuthCode(c.Context(), req.Code)

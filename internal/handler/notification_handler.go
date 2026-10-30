@@ -4,6 +4,7 @@ import (
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,7 +32,7 @@ func (h *NotificationHandler) GetNotifications(c fiber.Ctx) error {
 
 	notifications, total, err := h.notificationService.GetNotifications(c.Context(), userID, filter)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get notifications", err)
+		return respondError(c, "Failed to get notifications", err)
 	}
 	meta := response.CalculatePaginationMeta(total, offset, limit)
 	return response.SuccessWithMeta(c, "Notifications fetched successfully", notifications, meta)
@@ -44,7 +45,7 @@ func (h *NotificationHandler) GetUnreadCount(c fiber.Ctx) error {
 	}
 	count, err := h.notificationService.GetUnreadCount(c.Context(), userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get unread notification count", err)
+		return respondError(c, "Failed to get unread notification count", err)
 	}
 	return response.Success(c, "Unread notification count fetched successfully", count)
 }
@@ -58,9 +59,14 @@ func (h *NotificationHandler) MarkAsRead(c fiber.Ctx) error {
 	if id == "" {
 		return response.BadRequest(c, "Notification ID is required", nil)
 	}
+	// Notification ids are UUIDs; reject a malformed one up front instead of
+	// letting Postgres fail the uuid cast (22P02) and surface it as a 500.
+	if !validator.IsValidUUID(id) {
+		return response.BadRequest(c, MsgInvalidNotificationID, nil)
+	}
 	notification, err := h.notificationService.MarkAsRead(c.Context(), id, userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to mark notification as read", err)
+		return respondError(c, "Failed to mark notification as read", err)
 	}
 	return response.Success(c, "Notification marked as read successfully", notification)
 }
@@ -72,7 +78,7 @@ func (h *NotificationHandler) MarkAllAsRead(c fiber.Ctx) error {
 	}
 	result, err := h.notificationService.MarkAllAsRead(c.Context(), userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to mark all notifications as read", err)
+		return respondError(c, "Failed to mark all notifications as read", err)
 	}
 	return response.Success(c, "All notifications marked as read successfully", result)
 }

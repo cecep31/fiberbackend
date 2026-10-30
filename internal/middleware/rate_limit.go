@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +51,10 @@ func FixedWindowRateLimiterWithCache(redisCache *cache.RedisCache, name string, 
 		}
 
 		now := time.Now()
-		identifier := c.IP()
+		// c.IP() may alias fasthttp's request buffer (X-Forwarded-For with
+		// TrustProxy), which is reused after the request; the in-memory store
+		// keeps identifiers as map keys, so take an owned copy.
+		identifier := strings.Clone(c.IP())
 		if identifier == "" {
 			identifier = c.RequestCtx().RemoteAddr().String()
 		}

@@ -38,8 +38,18 @@ func (s *stubGuildChannelService) IsMember(context.Context, string, string) (boo
 
 func newStreamServer(t *testing.T, svc service.GuildChannelService) string {
 	t.Helper()
-	app := fiber.New()
+	return newStreamServerWith(t, svc, fiber.Config{}, 0)
+}
+
+// newStreamServerWith serves the stream route on a real listener with the given
+// app config; a non-zero heartbeat overrides the handler's 25s interval.
+func newStreamServerWith(t *testing.T, svc service.GuildChannelService, cfg fiber.Config, heartbeat time.Duration) string {
+	t.Helper()
+	app := fiber.New(cfg)
 	h := NewGuildChannelHandler(svc)
+	if heartbeat > 0 {
+		h.streamHeartbeat = heartbeat
+	}
 	app.Get("/api/guilds/:slug/events", func(c fiber.Ctx) error {
 		c.Locals("user", jwt.MapClaims{"user_id": "user-1"})
 		return c.Next()
@@ -100,6 +110,71 @@ func TestStreamEvents_ForwardsEventsUntilHubCloses(t *testing.T) {
 	_ = hub.Close()
 	if _, err := reader.ReadString('\n'); err == nil {
 		t.Fatal("stream should end after the hub closes")
+	}
+}
+
+// fasthttp sets WriteTimeout once, as an absolute deadline when the response
+// starts. The stream must refresh the conn's write deadline per frame so it
+// outlives WriteTimeout (60s in production) instead of being cut by it.
+func TestStreamEvents_OutlivesServerWriteTimeout(t *testing.T) {
+	hub := realtime.NewHub(nil)
+	hub.Start()
+	defer func() { _ = hub.Close() }()
+
+	const writeTimeout = 200 * time.Millisecond
+	baseURL := newStreamServerWith(t, &stubGuildChannelService{hub: hub, isMember: true},
+		fiber.Config{WriteTimeout: writeTimeout}, 50*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/guilds/g/events", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+
+	reader := bufio.NewReader(res.Body)
+	readLine := func() string {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("stream ended early: %v", err)
+		}
+		return strings.TrimRight(line, "\n")
+	}
+	if line := readLine(); line != ": connected" {
+		t.Fatalf("first line = %q", line)
+	}
+	readLine()
+
+	// Keep reading heartbeats until the stream is several WriteTimeouts old.
+	opened := time.Now()
+	pings := 0
+	for time.Since(opened) < 5*writeTimeout {
+		if line := readLine(); line != ": ping" {
+			t.Fatalf("heartbeat line = %q", line)
+		}
+		readLine()
+		pings++
+	}
+	if pings < 2 {
+		t.Fatalf("got %d heartbeats, want at least 2", pings)
+	}
+
+	// Events published long after WriteTimeout must still be delivered.
+	_ = hub.Publish(ctx, service.GuildEventTopic("guild-1"), dto.GuildEvent{Type: dto.GuildEventMessageCreated, GuildID: "guild-1"})
+	for {
+		line := readLine()
+		if line == "" || line == ": ping" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") || !strings.Contains(line, `"type":"message.created"`) {
+			t.Fatalf("event line = %q", line)
+		}
+		break
 	}
 }
 

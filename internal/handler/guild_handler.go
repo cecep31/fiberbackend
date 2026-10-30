@@ -29,8 +29,8 @@ func (h *GuildHandler) CreateGuild(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	guild, err := h.guildService.CreateGuild(c.Context(), userID, &req)
@@ -113,8 +113,8 @@ func (h *GuildHandler) UpdateGuild(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	guild, err := h.guildService.UpdateGuild(c.Context(), guildSlug, userID, &req)

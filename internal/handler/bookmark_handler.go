@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"errors"
 	"io"
 
@@ -30,12 +31,16 @@ func (h *BookmarkHandler) ToggleBookmark(c fiber.Ctx) error {
 		return response.BadRequest(c, "Post ID is required", nil)
 	}
 
+	// The body is optional: an empty (or whitespace-only) body is treated as
+	// {} whatever the Content-Type, like echo's Bind on a zero-length body.
 	var req dto.ToggleBookmarkRequest
-	if err := c.Bind().Body(&req); err != nil && !errors.Is(err, io.EOF) {
-		return response.BadRequest(c, "Invalid request body", err)
+	if len(bytes.TrimSpace(c.Body())) > 0 {
+		if err := c.Bind().Body(&req); err != nil && !errors.Is(err, io.EOF) {
+			return response.BadRequest(c, "Invalid request body", err)
+		}
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	result, err := h.bookmarkService.ToggleBookmark(c.Context(), postID, userID, &req)
@@ -89,8 +94,8 @@ func (h *BookmarkHandler) UpdateBookmark(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	bookmark, err := h.bookmarkService.UpdateBookmark(c.Context(), bookmarkID, userID, &req)
@@ -117,8 +122,8 @@ func (h *BookmarkHandler) MoveBookmark(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	bookmark, err := h.bookmarkService.MoveBookmark(c.Context(), bookmarkID, userID, req.FolderID)
@@ -141,8 +146,8 @@ func (h *BookmarkHandler) CreateFolder(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	folder, err := h.bookmarkService.CreateFolder(c.Context(), userID, &req)
@@ -185,8 +190,8 @@ func (h *BookmarkHandler) UpdateFolder(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	folder, err := h.bookmarkService.UpdateFolder(c.Context(), folderID, userID, &req)

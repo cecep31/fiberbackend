@@ -37,23 +37,9 @@ func main() {
 		panic(err)
 	}
 
-	app := fiber.New(fiber.Config{
-		AppName:   "fiberbackend",
-		BodyLimit: 10 * 1024 * 1024, // 10MB request body limit
-		// ReadTimeout covers the full request body read. For most endpoints 60 s
-		// is fine, but file uploads can be slow on poor connections; the 10 MB
-		// body limit bounds abuse. fasthttp applies WriteTimeout per chunk write,
-		// so SSE streams (heartbeat every 25 s) stay well inside it.
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  60 * time.Second,
-		// When TrustProxy is enabled, client IP is extracted from
-		// X-Forwarded-For. Use only behind a trusted reverse proxy.
-		TrustProxy: conf.HTTP.TrustProxy,
-		TrustProxyConfig: fiber.TrustProxyConfig{
-			Proxies: conf.TrustedProxyCIDRs(),
-		},
-	})
+	// Body limit, timeouts, enveloped error responses and client-IP
+	// resolution (HTTP_TRUST_PROXY) live in middleware.AppConfig.
+	app := fiber.New(middleware.AppConfig(conf))
 
 	// Global middleware must be registered before routes so CORS, security
 	// headers, rate limiting, and recover apply to all endpoints.

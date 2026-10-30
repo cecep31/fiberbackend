@@ -81,8 +81,8 @@ Investment portfolio records per user per month/year. **All holdings and holding
 | `totalProfitLoss` | string |
 | `totalProfitLossPercentage` | string |
 | `holdingsCount` | number |
-| `typeBreakdown` | breakdown array by type |
-| `platformBreakdown` | breakdown array by platform |
+| `typeBreakdown` | breakdown array by type, sorted by type name ascending (`[]` when empty) |
+| `platformBreakdown` | breakdown array by platform, sorted by platform ascending (`[]` when empty) |
 
 ---
 
@@ -90,7 +90,7 @@ Investment portfolio records per user per month/year. **All holdings and holding
 
 **Query:** `years` - comma-separated years, for example `2024,2025`.
 
-**Success - 200** - `data`: `HoldingTrendResponse[]` (`date`, `invested`, `current`, `profitLoss`, `profitLossPercentage`).
+**Success - 200** - `data`: `HoldingTrendResponse[]` (`date`, `invested`, `current`, `profitLoss`, `profitLossPercentage`). `[]` when there are no holdings for those years.
 
 ---
 
@@ -98,7 +98,7 @@ Investment portfolio records per user per month/year. **All holdings and holding
 
 **Query:** `fromMonth`, `fromYear`, `toMonth`, `toYear` (default period: previous month -> current month).
 
-**Success - 200** - comparison of `fromMonth` / `toMonth`, `summary`, `typeComparison`, `platformComparison`.
+**Success - 200** - comparison of `fromMonth` / `toMonth`, `summary`, `typeComparison`, `platformComparison`. `typeComparison` / `platformComparison` are sorted by name ascending and are `[]` when both months are empty; `summary.from` / `summary.to` breakdowns follow the summary ordering.
 
 ---
 
@@ -111,9 +111,14 @@ Investment portfolio records per user per month/year. **All holdings and holding
 | `startMonth`, `startYear` | Current month/year | One endpoint of the desired range |
 | `endMonth`, `endYear` | 11 months before start | The other endpoint of the desired range when omitted |
 
-The two endpoints can be passed in either chronological order. The handler normalizes them internally so that `start` becomes the latest month and `end` the oldest month in the returned series. If `end` is omitted, it defaults to 11 months before `start` (returning a 12-month series).
+The two endpoints can be passed in either chronological order. The handler normalizes them internally so that `start` becomes the latest month and `end` the oldest month in the returned series. If `end` is omitted, it defaults to 11 months before `start` (returning a 12-month series). If only one `end` component is given, the missing one is copied from `start`. Months outside 1-12 (or not integers) are ignored.
 
 **Success - 200** - `data`: `HoldingMonthlyDataResponse[]`.
+
+| HTTP | Condition |
+|------|-----------|
+| 400 | `startYear` / `endYear` is not an integer or is outside 1990 to current year + 1 - message `Invalid monthly range`, error `end month/year must be on or before start month/year` |
+| 400 | Resolved range spans more than 240 months (20 years) - message `Failed to get monthly data`, error `requested month/year range is too large` |
 
 ---
 
@@ -170,9 +175,17 @@ Each item in `actions` has the following fields:
 | `current_value` | Yes | decimal string |
 | `month` | Yes | 1-12 |
 | `year` | Yes | min 2000 |
-| `symbol`, `units`, `avg_buy_price`, `current_price`, `last_updated`, `notes` | No | |
+| `units`, `avg_buy_price`, `current_price` | No | decimal string when present |
+| `symbol`, `last_updated`, `notes` | No | |
+
+Decimal strings are trimmed and must be a plain decimal (optional sign, digits, optional fractional part); exponents, `NaN` and `Infinity` are rejected. The trimmed value is stored.
 
 **Success - 201** - `data`: `Holding[]` (one element).
+
+| HTTP | Condition |
+|------|-----------|
+| 400 | Unknown `holding_type_id` - error `holding type not found` |
+| 400 | Invalid decimal - message `Failed to create holding`, error `Invalid decimal value for <field>` (fields checked in order `invested_amount`, `current_value`, `units`, `avg_buy_price`, `current_price`; first failure wins) |
 
 ---
 
@@ -213,6 +226,8 @@ Sync prices for the user's active period.
 ## PUT `/api/holdings/:id`
 
 **Body:** `UpdateHoldingRequest` - optional fields; the handler does not always call global body validation.
+
+Amount fields that are present follow the same decimal rules as create; a failure returns **400** with message `Failed to update holding` and error `Invalid decimal value for <field>`.
 
 **Success - 200** - `data`: `[Holding]`.
 

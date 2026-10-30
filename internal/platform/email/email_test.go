@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"fiberbackend/config"
-	"fiberbackend/internal/platform/queue"
 )
 
 func TestEmailService_Unconfigured(t *testing.T) {
-	svc := NewService(config.EmailConfig{}, nil)
+	svc := NewService(config.EmailConfig{})
 
 	if svc.IsConfigured() {
 		t.Fatal("expected unconfigured service to report IsConfigured() == false")
@@ -32,9 +31,7 @@ func TestEmailService_Unconfigured(t *testing.T) {
 	}
 }
 
-func TestEmailService_SMTPWithoutQueueIsUnconfigured(t *testing.T) {
-	// Fiber's email delivery goes through the Asynq queue: SMTP settings alone
-	// are not enough for the service to report itself as configured.
+func TestEmailService_ConfiguredAndQueue(t *testing.T) {
 	cfg := config.EmailConfig{
 		SMTPHost:     "127.0.0.1",
 		SMTPPort:     2525,
@@ -45,15 +42,17 @@ func TestEmailService_SMTPWithoutQueueIsUnconfigured(t *testing.T) {
 		TaskTimeout:  5 * time.Second,
 	}
 
-	svc := NewService(cfg, queue.NewService(config.QueueConfig{}))
-	if svc.IsConfigured() {
-		t.Fatal("expected service without a configured queue to report IsConfigured() == false")
+	svc := NewService(cfg)
+	if !svc.IsConfigured() {
+		t.Fatal("expected service to report IsConfigured() == true")
 	}
 
-	if err := svc.EnqueuePasswordResetEmail("test@example.com", "http://localhost/reset?token=abc"); err == nil {
-		t.Fatal("expected error when enqueuing without a configured queue")
+	err := svc.EnqueuePasswordResetEmail("test@example.com", "http://localhost/reset?token=abc")
+	if err != nil {
+		t.Fatalf("unexpected error enqueuing email: %v", err)
 	}
 
+	time.Sleep(50 * time.Millisecond)
 	if err := svc.Close(); err != nil {
 		t.Fatalf("unexpected error closing service: %v", err)
 	}

@@ -42,7 +42,7 @@ Post bookmarking and folder organization. **All routes require a Bearer token.**
 | `user_id` | string (UUID) |
 | `name` | string |
 | `description` | string \| null |
-| `bookmark_count` | number |
+| `bookmark_count` | number (all bookmarks in the folder, also when nested in a `BookmarkResponse`) |
 | `created_at` | string \| null |
 | `updated_at` | string \| null |
 
@@ -59,7 +59,7 @@ Post bookmarking and folder organization. **All routes require a Bearer token.**
 
 Toggle a bookmark on a post. If it already exists, it is removed; otherwise it is created.
 
-**Body (`ToggleBookmarkRequest`)** - all fields are optional
+**Body (`ToggleBookmarkRequest`)** - optional; an empty body (any or no `Content-Type`) is treated as `{}`. All fields are optional
 
 | Field | Validation |
 |-------|------------|

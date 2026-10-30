@@ -22,14 +22,21 @@ const (
 	// also how often a subscriber's membership is re-checked, so a member who
 	// leaves stops receiving events within this interval.
 	guildStreamHeartbeat = 25 * time.Second
+	// guildStreamWriteTimeout bounds each write to the stream. fasthttp sets a
+	// single absolute write deadline (the server-wide WriteTimeout) when the
+	// response starts, so the stream refreshes it before every frame or it
+	// would be cut WriteTimeout after it opened.
+	guildStreamWriteTimeout = 10 * time.Second
 )
 
 type GuildChannelHandler struct {
 	channelService service.GuildChannelService
+	// streamHeartbeat is guildStreamHeartbeat; tests shorten it.
+	streamHeartbeat time.Duration
 }
 
 func NewGuildChannelHandler(channelService service.GuildChannelService) *GuildChannelHandler {
-	return &GuildChannelHandler{channelService: channelService}
+	return &GuildChannelHandler{channelService: channelService, streamHeartbeat: guildStreamHeartbeat}
 }
 
 func (h *GuildChannelHandler) ListChannels(c fiber.Ctx) error {
@@ -53,8 +60,8 @@ func (h *GuildChannelHandler) CreateChannel(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	channel, err := h.channelService.CreateChannel(c.Context(), c.Params("slug"), userID, &req)
@@ -74,8 +81,8 @@ func (h *GuildChannelHandler) UpdateChannel(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	channel, err := h.channelService.UpdateChannel(c.Context(), c.Params("slug"), c.Params("channelId"), userID, &req)
@@ -125,8 +132,8 @@ func (h *GuildChannelHandler) SendMessage(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	message, err := h.channelService.SendMessage(c.Context(), c.Params("slug"), c.Params("channelId"), userID, &req)
@@ -146,8 +153,8 @@ func (h *GuildChannelHandler) EditMessage(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	message, err := h.channelService.EditMessage(
@@ -196,18 +203,43 @@ func (h *GuildChannelHandler) StreamEvents(c fiber.Ctx) error {
 	// Stop nginx-style proxies from buffering the stream.
 	c.Set("X-Accel-Buffering", "no")
 
-	// fasthttp streams the body through a writer that is flushed after every
-	// write; WriteTimeout applies per chunk, so the 25s heartbeat keeps the
-	// stream inside the app's 60s write deadline. The handler returns as soon
-	// as the stream writer is registered, so the subscription must be closed
-	// from inside the writer once the loop exits — not via defer in the
-	// handler.
+	// fasthttp sets one absolute write deadline (now + WriteTimeout) before it
+	// writes the response and never refreshes it while copying the body
+	// stream to the socket, so without intervention the stream would be cut
+	// WriteTimeout (60s) after it opened. Like echobackend, every frame first
+	// pushes the connection's write deadline guildStreamWriteTimeout ahead:
+	// the writer below fills an in-memory pipe that the server goroutine
+	// copies to the conn right after each Flush, so that copy runs under the
+	// refreshed deadline. (The very first frame may race fasthttp's own
+	// deadline, which still covers it.) The fiber ctx must not be used inside
+	// the writer: the handler returns as soon as the writer is registered and
+	// the ctx is recycled, which is also why the subscription is closed from
+	// inside the writer rather than via defer in the handler.
+	conn := c.RequestCtx().Conn()
+	heartbeatEvery := h.streamHeartbeat
+	if heartbeatEvery <= 0 {
+		heartbeatEvery = guildStreamHeartbeat
+	}
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer sub.Close()
-		_, _ = w.WriteString(": connected\n\n")
-		_ = w.Flush()
 
-		heartbeat := time.NewTicker(guildStreamHeartbeat)
+		write := func(frame string) error {
+			if conn != nil {
+				if err := conn.SetWriteDeadline(time.Now().Add(guildStreamWriteTimeout)); err != nil {
+					return err
+				}
+			}
+			if _, err := w.WriteString(frame); err != nil {
+				return err
+			}
+			return w.Flush()
+		}
+
+		if err := write(": connected\n\n"); err != nil {
+			return
+		}
+
+		heartbeat := time.NewTicker(heartbeatEvery)
 		defer heartbeat.Stop()
 
 		for {
@@ -218,10 +250,9 @@ func (h *GuildChannelHandler) StreamEvents(c fiber.Ctx) error {
 				if !ok {
 					return
 				}
-				if _, err := w.WriteString(fmt.Sprintf("data: %s\n\n", payload)); err != nil {
+				if err := write(fmt.Sprintf("data: %s\n\n", payload)); err != nil {
 					return
 				}
-				_ = w.Flush()
 			case <-heartbeat.C:
 				member, err := h.channelService.IsMember(ctx, guildID, userID)
 				if err != nil {
@@ -229,10 +260,9 @@ func (h *GuildChannelHandler) StreamEvents(c fiber.Ctx) error {
 				} else if !member {
 					return
 				}
-				if _, err := w.WriteString(": ping\n\n"); err != nil {
+				if err := write(": ping\n\n"); err != nil {
 					return
 				}
-				_ = w.Flush()
 			}
 		}
 	})

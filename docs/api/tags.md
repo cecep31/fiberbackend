@@ -66,7 +66,7 @@ Create, get-by-id, and update all return this shape. The tag model's `created_at
 
 ## GET `/api/tags`
 
-**Success - 200** - `data`: `TagResponse[]`.
+**Success - 200** - `data`: `TagResponse[]`, sorted by `name` ascending (not paginated).
 
 ---
 
@@ -124,14 +124,14 @@ Example response:
 |-------|------|----------|------------|
 | `name` | string | Yes | 1-30 characters |
 
-Super admin only.
+Super admin only. Only `name` is updated; `created_at` is kept. An unknown id (including `0`) returns 404 and creates nothing.
 
 **Success - 200** - `data`: `TagResponse`.
 
 | HTTP | Condition |
 |------|-----------|
 | 400 | Invalid ID |
-| 404 | Tag not found |
+| 404 | Tag not found (unknown id or `0`) |
 | 422 | Validation failed |
 
 ---
@@ -143,4 +143,4 @@ Super admin only.
 | HTTP | Condition |
 |------|-----------|
 | 400 | Invalid ID |
-| 404 | Tag not found |
+| 404 | Tag not found (unknown id or `0`) |

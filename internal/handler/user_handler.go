@@ -7,6 +7,7 @@ import (
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -25,6 +26,9 @@ func NewUserHandler(userService service.UserService, userFollowService service.U
 
 func (h *UserHandler) GetByID(c fiber.Ctx) error {
 	userID := c.Params("id")
+	if !validator.IsValidUUID(userID) {
+		return respondInvalidUserID(c)
+	}
 
 	if c.Query("deleted") == "true" {
 		userResponse, err := h.userService.GetAdminByID(c.Context(), userID, true)
@@ -90,6 +94,9 @@ func (h *UserHandler) GetUsers(c fiber.Ctx) error {
 
 func (h *UserHandler) DeleteUser(c fiber.Ctx) error {
 	id := c.Params("id")
+	if !validator.IsValidUUID(id) {
+		return respondInvalidUserID(c)
+	}
 	err := h.userService.Delete(c.Context(), id)
 	if err != nil {
 		return respondError(c, "Failed to delete user", err)
@@ -100,6 +107,9 @@ func (h *UserHandler) DeleteUser(c fiber.Ctx) error {
 
 func (h *UserHandler) RestoreUser(c fiber.Ctx) error {
 	id := c.Params("id")
+	if !validator.IsValidUUID(id) {
+		return respondInvalidUserID(c)
+	}
 
 	userResponse, err := h.userService.Restore(c.Context(), id)
 	if err != nil {
@@ -129,11 +139,21 @@ func (h *UserHandler) GetMe(c fiber.Ctx) error {
 	return response.Success(c, "Successfully retrieved current user", userResponse)
 }
 
+// maxAvatarBodyBytes is the request-body allowance for POST /users/me/image:
+// the 5 MB avatar cap plus 64 KB of multipart framing, so a file exactly at the
+// cap still fits.
+const maxAvatarBodyBytes = 5*1024*1024 + 64*1024
+
+// msgAvatarTooLarge is the 413 message (and error) for an oversized avatar.
+const msgAvatarTooLarge = "Avatar is too large (max 5 MB)"
+
 func (h *UserHandler) respondAvatarError(c fiber.Ctx, message string, err error) error {
 	switch {
 	case errors.Is(err, apperrors.ErrUserNotFound):
 		return response.NotFound(c, message, err)
-	case errors.Is(err, apperrors.ErrFileNil), errors.Is(err, apperrors.ErrAvatarFileTooLarge), errors.Is(err, apperrors.ErrInvalidFileType), errors.Is(err, apperrors.ErrStorageUnavailable):
+	case errors.Is(err, apperrors.ErrAvatarFileTooLarge):
+		return response.PayloadTooLargeWithMessage(c, msgAvatarTooLarge)
+	case errors.Is(err, apperrors.ErrFileNil), errors.Is(err, apperrors.ErrInvalidFileType), errors.Is(err, apperrors.ErrStorageUnavailable):
 		return response.BadRequest(c, message, err)
 	default:
 		return respondError(c, message, err)
@@ -144,6 +164,10 @@ func (h *UserHandler) UploadAvatar(c fiber.Ctx) error {
 	userID, ok := GetUserIDFromClaims(c)
 	if !ok {
 		return response.Unauthorized(c, "User not authenticated")
+	}
+
+	if c.Request().Header.ContentLength() > maxAvatarBodyBytes {
+		return response.PayloadTooLargeWithMessage(c, msgAvatarTooLarge)
 	}
 
 	file, err := c.FormFile("avatar")
@@ -170,8 +194,8 @@ func (h *UserHandler) CreateUser(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userResponse, err := h.userService.CreateUser(c.Context(), &req)
@@ -187,14 +211,17 @@ func (h *UserHandler) CreateUser(c fiber.Ctx) error {
 
 func (h *UserHandler) UpdateUser(c fiber.Ctx) error {
 	id := c.Params("id")
+	if !validator.IsValidUUID(id) {
+		return respondInvalidUserID(c)
+	}
 
 	var req dto.UpdateUserRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userResponse, err := h.userService.UpdateUser(c.Context(), id, &req)

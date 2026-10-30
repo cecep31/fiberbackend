@@ -14,16 +14,16 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// validate is the app validator for bound request structs. Handlers must
+// return the 422 straight from the validation branch, like echo's c.Validate:
+//
+//	if err := validate.Validate(&req); err != nil {
+//		return response.FromValidateError(c, err)
+//	}
+//
+// (A helper that writes the 422 and returns its nil write error would let the
+// handler carry on and run the service with the invalid input.)
 var validate = validator.NewValidator()
-
-// bindValidate runs app validation on a bound request struct and maps
-// validation failures to a structured 422 response (mirrors echo's c.Validate).
-func bindValidate(c fiber.Ctx, req any) error {
-	if err := validate.Validate(req); err != nil {
-		return response.FromValidateError(c, err)
-	}
-	return nil
-}
 
 // GetUserIDFromClaims reads the authenticated user ID from JWT claims
 // previously stored in the context by the auth middleware.
@@ -118,6 +118,26 @@ func isSuperAdmin(ctx context.Context, userService service.UserService, userID s
 		return false
 	}
 	return *user.IsSuperAdmin
+}
+
+// MsgInvalidUserID is the 400 message for a :id path segment that is not a
+// UUID; checked before any DB call so Postgres never sees a malformed uuid.
+const MsgInvalidUserID = "Invalid user ID"
+
+// MsgInvalidNotificationID is the 400 message for a notification :id path
+// segment that is not a UUID.
+const MsgInvalidNotificationID = "Invalid notification ID"
+
+// MsgInvalidConversationID / MsgInvalidMessageID are the 400 messages for chat
+// path segments (:id, :conversationId, :messageId) that are not UUIDs.
+const (
+	MsgInvalidConversationID = "Invalid conversation ID"
+	MsgInvalidMessageID      = "Invalid message ID"
+)
+
+// respondInvalidUserID answers a malformed user :id path parameter with 400.
+func respondInvalidUserID(c fiber.Ctx) error {
+	return response.BadRequest(c, MsgInvalidUserID, apperrors.ErrInvalidUserID)
 }
 
 // respondError maps well-known domain errors to their HTTP status and falls

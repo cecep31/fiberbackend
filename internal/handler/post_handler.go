@@ -99,8 +99,8 @@ func (h *PostHandler) CreatePost(c fiber.Ctx) error {
 		return response.BadRequest(c, "Failed to create post", err)
 	}
 
-	if err := bindValidate(c, &postReq); err != nil {
-		return err
+	if err := validate.Validate(&postReq); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)
@@ -128,8 +128,8 @@ func (h *PostHandler) UpdatePost(c fiber.Ctx) error {
 		return response.BadRequest(c, "Failed to update post", err)
 	}
 
-	if err := bindValidate(c, &updateDTO); err != nil {
-		return err
+	if err := validate.Validate(&updateDTO); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	updatedPost, err := h.postService.UpdatePost(c.Context(), id, &updateDTO)
@@ -151,8 +151,8 @@ func (h *PostHandler) UpdateMyPost(c fiber.Ctx) error {
 		return response.BadRequest(c, "Failed to update post", err)
 	}
 
-	if err := bindValidate(c, &updateDTO); err != nil {
-		return err
+	if err := validate.Validate(&updateDTO); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)
@@ -383,8 +383,16 @@ func (h *PostHandler) GetPostsByUsername(c fiber.Ctx) error {
 func (h *PostHandler) GetPostsByTag(c fiber.Ctx) error {
 	tag := c.Params("tag")
 	limit, offset := ParsePaginationParams(c, 10)
+	sortBy := c.Query("sort_by")
+	if sortBy == "" {
+		sortBy = c.Query("orderBy")
+	}
+	sortOrder := c.Query("sort_order")
+	if sortOrder == "" {
+		sortOrder = c.Query("orderDirection")
+	}
 
-	posts, total, err := h.postService.GetPostsByTag(c.Context(), tag, limit, offset)
+	posts, total, err := h.postService.GetPostsByTag(c.Context(), tag, limit, offset, sortBy, sortOrder)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to get posts by tag", err)
 	}

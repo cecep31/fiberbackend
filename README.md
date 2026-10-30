@@ -4,7 +4,7 @@ A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL
 
 ## Core Features
 
-- **User Management**: Auth (JWT + rotating DB-backed refresh tokens, RFC 9700), GitHub OAuth, password reset (SMTP/queue), activity logs, profiles, following.
+- **User Management**: Auth (JWT + rotating DB-backed refresh tokens, RFC 9700), GitHub OAuth, password reset (SMTP, in-process workers), activity logs, profiles, following.
 - **Content Management**: Posts with rich text, tags, comments, bookmarks (+ folders), post views, likes, sitemap & trending.
 - **Guilds**: Discord-style channels and messages with realtime updates over SSE (one stream per guild).
 - **Moderation**: post reports, admin hide/unhide, comment spam guard.
@@ -23,7 +23,7 @@ A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL
 - **Database**: PostgreSQL 18+
 - **Cache**: Valkey/Redis (optional)
 - **Storage**: MinIO / AWS S3 (optional)
-- **Queue/Email**: Asynq + SMTP (optional)
+- **Email**: SMTP with in-process background workers (optional)
 - **Migrations**: [Goose](https://github.com/pressly/goose) (Raw SQL)
 
 ## Quick Start
@@ -56,7 +56,7 @@ The application requires the following mandatory environment variables to start:
 | `DATABASE_URL` | PostgreSQL connection string (DSN) |
 | `JWT_SECRET` | Secret key for JWT signing & verification (≥ 32 chars) |
 
-All other configurations (S3, Valkey, SMTP, Asynq, GitHub OAuth, OpenRouter, market data, rate limiting, CORS) are optional and documented in [`.env.example`](.env.example). Many keys accept legacy fallback aliases (first-set wins).
+All other configurations (S3, Valkey, SMTP, GitHub OAuth, OpenRouter, market data, rate limiting, CORS) are optional and documented in [`.env.example`](.env.example). Many keys accept legacy fallback aliases (first-set wins).
 
 ## Architecture
 
@@ -69,7 +69,7 @@ Modular layered architecture with manual dependency injection:
 - **`internal/model/`**: GORM entities and shared domain models.
 - **`internal/dto/`**: Request/response structs and converters.
 - **`internal/apperror/`**: Shared application error sentinels.
-- **`internal/platform/`**: App-owned infrastructure adapters (cache, database, email, openrouter, queue, realtime, storage).
+- **`internal/platform/`**: App-owned infrastructure adapters (cache, database, email, openrouter, realtime, storage).
 - **`pkg/`**: Reusable helper packages (antispam, applog, market, password, response, slug, uid, validator).
 
 ## API Documentation

@@ -4,6 +4,7 @@ import (
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -27,13 +28,13 @@ func (h *UserFollowHandler) FollowUser(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request body", err)
 	}
 
-	if err := bindValidate(c, &followReq); err != nil {
-		return err
+	if err := validate.Validate(&followReq); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	followResponse, err := h.userFollowService.FollowUser(c.Context(), userID, followReq.UserID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to follow user", err)
+		return respondError(c, "Failed to follow user", err)
 	}
 
 	return response.Success(c, followResponse.Message, followResponse)
@@ -46,13 +47,13 @@ func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
 	}
 
 	userIDToUnfollow := c.Params("id")
-	if userIDToUnfollow == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(userIDToUnfollow) {
+		return respondInvalidUserID(c)
 	}
 
 	followResponse, err := h.userFollowService.UnfollowUser(c.Context(), userID, userIDToUnfollow)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to unfollow user", err)
+		return respondError(c, "Failed to unfollow user", err)
 	}
 
 	return response.Success(c, followResponse.Message, followResponse)
@@ -60,15 +61,15 @@ func (h *UserFollowHandler) UnfollowUser(c fiber.Ctx) error {
 
 func (h *UserFollowHandler) GetFollowers(c fiber.Ctx) error {
 	userID := c.Params("id")
-	if userID == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(userID) {
+		return respondInvalidUserID(c)
 	}
 
 	limit, offset := ParsePaginationParams(c, 10)
 
 	followers, total, err := h.userFollowService.GetFollowers(c.Context(), userID, limit, offset)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get followers", err)
+		return respondError(c, "Failed to get followers", err)
 	}
 
 	meta := response.CalculatePaginationMeta(total, offset, limit)
@@ -78,15 +79,15 @@ func (h *UserFollowHandler) GetFollowers(c fiber.Ctx) error {
 
 func (h *UserFollowHandler) GetFollowing(c fiber.Ctx) error {
 	userID := c.Params("id")
-	if userID == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(userID) {
+		return respondInvalidUserID(c)
 	}
 
 	limit, offset := ParsePaginationParams(c, 10)
 
 	following, total, err := h.userFollowService.GetFollowing(c.Context(), userID, limit, offset)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get following", err)
+		return respondError(c, "Failed to get following", err)
 	}
 
 	meta := response.CalculatePaginationMeta(total, offset, limit)
@@ -96,13 +97,13 @@ func (h *UserFollowHandler) GetFollowing(c fiber.Ctx) error {
 
 func (h *UserFollowHandler) GetFollowStats(c fiber.Ctx) error {
 	userID := c.Params("id")
-	if userID == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(userID) {
+		return respondInvalidUserID(c)
 	}
 
 	stats, err := h.userFollowService.GetFollowStats(c.Context(), userID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get follow statistics", err)
+		return respondError(c, "Failed to get follow statistics", err)
 	}
 
 	return response.Success(c, "Successfully retrieved follow statistics", stats)
@@ -115,13 +116,13 @@ func (h *UserFollowHandler) CheckFollowStatus(c fiber.Ctx) error {
 	}
 
 	targetUserID := c.Params("id")
-	if targetUserID == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(targetUserID) {
+		return respondInvalidUserID(c)
 	}
 
 	isFollowing, err := h.userFollowService.IsFollowing(c.Context(), userID, targetUserID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to check follow status", err)
+		return respondError(c, "Failed to check follow status", err)
 	}
 
 	return response.Success(c, "Successfully checked follow status", map[string]bool{
@@ -136,13 +137,13 @@ func (h *UserFollowHandler) GetMutualFollows(c fiber.Ctx) error {
 	}
 
 	otherUserID := c.Params("id")
-	if otherUserID == "" {
-		return response.BadRequest(c, "User ID is required", nil)
+	if !validator.IsValidUUID(otherUserID) {
+		return respondInvalidUserID(c)
 	}
 
 	mutualFollows, err := h.userFollowService.GetMutualFollows(c.Context(), userID, otherUserID)
 	if err != nil {
-		return response.InternalServerError(c, "Failed to get mutual follows", err)
+		return respondError(c, "Failed to get mutual follows", err)
 	}
 
 	return response.Success(c, "Successfully retrieved mutual follows", mutualFollows)

@@ -10,7 +10,6 @@ import (
 	"fiberbackend/internal/platform/email"
 	"fiberbackend/internal/platform/market"
 	"fiberbackend/internal/platform/openrouter"
-	"fiberbackend/internal/platform/queue"
 	"fiberbackend/internal/platform/realtime"
 	"fiberbackend/internal/platform/storage"
 	"fiberbackend/internal/repository"
@@ -58,17 +57,11 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	hub.Start()
 	cleanup.Register(hub.Close)
 
-	taskQueue := queue.NewService(cfg.Queue)
-	cleanup.Register(func() error {
-		return taskQueue.Close()
-	})
-
 	s3Storage := storage.NewS3Storage(cfg)
-	emailService := email.NewService(cfg.Email, taskQueue)
+	emailService := email.NewService(cfg.Email)
 	cleanup.Register(func() error {
 		return emailService.Close()
 	})
-	taskQueue.Start()
 
 	userRepo := repository.NewUserRepository(db)
 	postRepo := repository.NewPostRepository(db)

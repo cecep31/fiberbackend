@@ -76,9 +76,12 @@ Query: `limit` (default varies by endpoint, **maximum 100** on most endpoints �
 
 ## Global Limits
 
-- Request body size: **10 MB** (larger requests return **413**).
-- CORS: `HTTP_ALLOW_ORIGINS` (default `*`).
-- Global rate limit: enabled when `HTTP_RATE_LIMIT_RPS` > 0.
+- Request body size: **10 MB**. Larger requests return **413** `{"success":false,"message":"Request Entity Too Large","error":"Request body too large"}`.
+- CORS: `HTTP_ALLOW_ORIGINS` (default `*`). CORS headers are also set on 404/405/413/429 responses.
+- Global rate limit: enabled when `HTTP_RATE_LIMIT_RPS` (alias `RATE_LIMITER_MAX`) > 0. It is a per-client-IP token bucket: `HTTP_RATE_LIMIT_RPS` tokens per second, burst 2× that. `HTTP_RATE_LIMIT_WINDOW_SEC` (alias `RATE_LIMITER_TTL`) only sets how long an idle client is remembered (default 3 minutes); it is not a counting window. A denied request gets **429** with a `Retry-After` header (seconds) and `{"success":false,"message":"Too many attempts. Please try again later.","error":"Rate limit exceeded"}`.
+- Client IP: with `HTTP_TRUST_PROXY=true` (alias `TRUST_PROXY`), `X-Forwarded-For` is walked right to left and the first hop outside loopback, private, link-local and CGNAT (`100.64.0.0/10`) ranges is the client IP; otherwise the peer address is used. It keys every per-IP limit and is stored in sessions, activity logs and post views.
+- Framework-level errors use the envelope too: unknown route → **404** `{"success":false,"message":"Route not found","error":"Resource not found"}`; known path, unsupported method → **405** `{"success":false,"message":"Method not allowed","error":"Method not allowed"}`; unhandled error or panic → **500** `{"success":false,"message":"Internal server error"}`.
+- Security headers on every response: `X-XSS-Protection: 1; mode=block`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Content-Security-Policy: default-src 'self'`, `Referrer-Policy: strict-origin-when-cross-origin`; over HTTPS (TLS, or a forwarded https scheme from a loopback/private proxy) also `Strict-Transport-Security: max-age=3600; includeSubdomains`.
 - Auth-specific rate limits use a fixed window per IP. If `VALKEY_URL` is set, counters are stored in Valkey/Redis and work across instances; otherwise they fall back to in-memory per instance:
   `register`, `login`, and `reset-password` **5 / 5 minutes**;
   `forgot-password` **3 / 5 minutes**;

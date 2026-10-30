@@ -8,8 +8,6 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
-	"github.com/gofiber/fiber/v3/middleware/helmet"
-	"github.com/gofiber/fiber/v3/middleware/limiter"
 )
 
 var httpLog = applog.Component("http")
@@ -26,18 +24,27 @@ var httpLog = applog.Component("http")
 //  4. Secure headers, rate limit.
 //
 // Body limit (10 MB) is enforced via fasthttp.MaxRequestBodySize in the
-// fiber.Config passed to fiber.New() (see cmd/main.go).
+// fiber.Config built by AppConfig. Errors returned through this chain (404/405
+// from the router, 413 from the body limit, recovered panics) are rendered by
+// ErrorHandler, which AppConfig installs as fiber.Config.ErrorHandler.
 func InitMiddleware(app *fiber.App, config *config.Config) {
 	// Enhanced request logging with structured format
 	app.Use(func(c fiber.Ctx) error {
 		start := time.Now()
 		err := c.Next()
 
+		// A returned error is rendered by ErrorHandler after this middleware
+		// unwinds, so log the status it is about to send.
+		status := c.Response().StatusCode()
+		if err != nil {
+			status, _ = errorStatus(err)
+		}
+
 		latency := time.Since(start)
 		httpLog.Info("handled request",
 			"method", c.Method(),
 			"uri", c.OriginalURL(),
-			"status", c.Response().StatusCode(),
+			"status", status,
 			"latency_ms", float64(latency.Nanoseconds())/1e6,
 			"remote_ip", c.IP(),
 		)
@@ -49,27 +56,11 @@ func InitMiddleware(app *fiber.App, config *config.Config) {
 
 	app.Use(cors.New(cors.Config{AllowOrigins: config.HTTP.AllowOrigins}))
 
-	// Add security headers
-	app.Use(helmet.New(helmet.Config{
-		XSSProtection:         "1; mode=block",
-		ContentTypeNosniff:    "nosniff",
-		XFrameOptions:         "SAMEORIGIN",
-		HSTSMaxAge:            3600,
-		ContentSecurityPolicy: "default-src 'self'",
-		ReferrerPolicy:        "strict-origin-when-cross-origin",
-	}))
+	// Add security headers (same set and values as echobackend)
+	app.Use(SecureHeaders())
 
-	// Global HTTP rate limit (sustained RPS with 2x burst; 0 = disabled).
-	// RateLimitWindow overrides the per-key window when set, mirroring echo's
-	// memory-store ExpiresIn.
+	// Global HTTP rate limit (per-IP token bucket; 0 = disabled).
 	if config.HTTP.RateLimitRPS > 0 {
-		expiration := time.Second
-		if config.HTTP.RateLimitWindow > 0 {
-			expiration = config.HTTP.RateLimitWindow
-		}
-		app.Use(limiter.New(limiter.Config{
-			Max:        config.HTTP.RateLimitRPS * 2, // burst = 2x sustained RPS
-			Expiration: expiration,
-		}))
+		app.Use(GlobalRateLimiter(config.HTTP.RateLimitRPS, config.HTTP.RateLimitWindow))
 	}
 }

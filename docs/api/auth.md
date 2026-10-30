@@ -108,7 +108,7 @@ Login with email **or** username in the `identifier` field.
 
 Request a password reset. The response is the **same** whether the email is registered or not (anti-enumeration).
 
-If `SMTP_HOST` is set and the Asynq queue is available through `QUEUE_REDIS_URL` or `VALKEY_URL`, the backend enqueues the password reset email and a worker sends it through SMTP. The reset link is built from `FRONTEND_RESET_PASSWORD_URL` with a `token` query parameter. If SMTP/queue is not configured, the token is still created and activity is recorded in dev mode metadata.
+If `SMTP_HOST` is set, the backend queues the password reset email in memory and a background worker (2 in-process workers, buffer of 128) sends it through SMTP — no Redis needed. The reset link is built from `FRONTEND_RESET_PASSWORD_URL` with a `token` query parameter. If SMTP is not configured, the token is still created and the link is recorded in dev mode activity metadata.
 
 **Related env vars**
 
@@ -121,11 +121,7 @@ If `SMTP_HOST` is set and the Asynq queue is available through `QUEUE_REDIS_URL`
 | `SMTP_FROM` | Sender email, default `noreply@pilput.net` |
 | `SMTP_TLS` | `true` for implicit TLS (commonly port 465), `false` for STARTTLS (commonly port 587) |
 | `SMTP_TIMEOUT_SECONDS` | SMTP connection timeout, default `10` |
-| `QUEUE_REDIS_URL` | Redis/Valkey URL for the Asynq broker. Falls back to `VALKEY_URL` when empty |
-| `QUEUE_REDIS_TIMEOUT_MS` | Redis connection/read/write timeout for Asynq, default `5000` |
-| `QUEUE_DEFAULT_NAME` | Default queue name for all background jobs, default `default` |
-| `QUEUE_CONCURRENCY` | Number of Asynq workers for all jobs, default `1` |
-| `QUEUE_MAX_RETRY` | Maximum task retry count, default `5` |
+| `SMTP_TASK_TIMEOUT_SECONDS` | Overall timeout for one background delivery attempt, default `30` |
 | `FRONTEND_RESET_PASSWORD_URL` | Frontend reset password page URL |
 
 **Body**
@@ -197,7 +193,7 @@ Extend a session with a refresh token. Returns a new access token; the refresh t
 
 ## POST `/api/auth/logout`
 
-Log out the user by deleting the refresh token session.
+Log out the user by revoking the whole rotation chain (session family) the refresh token belongs to. Unknown or already-revoked tokens still return 200, so logging out is idempotent. The lookup is scoped to the caller: a refresh token belonging to another user is treated as unknown and revokes nothing.
 
 **Header:** `Authorization: Bearer <access_token>`
 
@@ -244,6 +240,14 @@ Get the currently logged-in user's profile. Returns a flat subset of user fields
   }
 }
 ```
+
+**Errors**
+
+| HTTP | Condition |
+|------|-----------|
+| 401 | Missing or invalid token |
+| 404 | `User not found`: the token's user was deleted or soft-deleted |
+| 500 | Server error (`Failed to get profile`) |
 
 ---
 

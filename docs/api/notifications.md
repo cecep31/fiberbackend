@@ -66,6 +66,11 @@ Notifications are created automatically by the system, for example when a new co
 
 **Success - 200** - `data`: `NotificationResponse` with `read: true`.
 
+| HTTP | Condition |
+|------|-----------|
+| 400 | `id` is not a UUID (`Invalid notification ID`) |
+| 404 | Notification not found or owned by another user (`Failed to mark notification as read`) |
+
 ---
 
 ## PATCH `/api/notifications/read-all`

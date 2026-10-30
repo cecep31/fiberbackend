@@ -41,7 +41,7 @@ go mod download && go mod tidy && go mod verify
 - **Entry point**: `cmd/main.go` — loads config → creates DI container → registers routes → starts server with graceful shutdown (10s).
 - **DI**: Manual wiring in `internal/di/container.go`. All handler/service/repo/platform instances created there. **No reflection-based DI (e.g. dig).**
 - **Layering**: `handler` → `service` → `repository` → `model`.
-- **`internal/platform/`**: App-owned infrastructure adapters (`cache`, `database`, `email`, `market`, `openrouter`, `queue`, `realtime`, `storage`). All fail-open when their optional config is empty.
+- **`internal/platform/`**: App-owned infrastructure adapters (`cache`, `database`, `email`, `market`, `openrouter`, `realtime`, `storage`). All fail-open when their optional config is empty.
 - **`internal/dto/`**: Request/response structs + converters. `internal/apperror/` for shared app error sentinels.
 - **`pkg/`**: Reusable helper packages (`antispam`, `applog`, `password`, `response`, `slug`, `uid`, `validator`).
 - **API routes**: All under `/api/*`, defined in `internal/routes/*_routes.go`. Auth-protected routes use `r.authMiddleware.Auth()`; admin routes must chain `Auth()` **first**, then `r.authMiddleware.AuthAdmin()` (`AuthAdmin` reads the claims set by `Auth()` and returns 401 without them). `OptionalAuth()` exists for public-but-personalized endpoints. The `is_super_admin` claim is a fast path only — the DB (`GetAdminByID`) is authoritative.
@@ -55,13 +55,13 @@ go mod download && go mod tidy && go mod verify
 
 ## Config & Env
 
-- Config loaded via `config.Load()` (`config/config.go`) — reads `.env` (stdlib loader, best-effort) then environment variables. Grouped into sections: `App`, `HTTP`, `Auth`, `Database`, `S3`, `Cache`, `Queue`, `OpenRouter`, `GitHub`, `Frontend`, `Email`, `MarketData`.
+- Config loaded via `config.Load()` (`config/config.go`) — reads `.env` (stdlib loader, best-effort) then environment variables. Grouped into sections: `App`, `HTTP`, `Auth`, `Database`, `S3`, `Cache`, `OpenRouter`, `GitHub`, `Frontend`, `Email`, `MarketData`.
 - **Required**: `DATABASE_URL`, `JWT_SECRET`. App panics if missing (JWT must be ≥ 32 chars).
 - **Auth durations** accept duration strings: `JWT_EXPIRY` (default 15m), `REFRESH_TOKEN_EXPIRY` (sliding inactivity window, default 72h), `REFRESH_TOKEN_ABSOLUTE_EXPIRY` (hard ceiling, default 720h), `REFRESH_TOKEN_GRACE_PERIOD` (rotation replay window, default 1m).
 - **Pool knobs** (all optional): `DB_POOL_MAX_OPEN_CONNS`, `DB_POOL_MAX_IDLE_CONNS`, `DB_POOL_CONN_MAX_LIFETIME`, `DB_POOL_CONN_IDLE_TIME` (aliases: `MAX_OPEN_CONNS`, `MAX_IDLE_CONNS`, `CONN_MAX_LIFETIME`, `CONN_MAX_IDLE_TIME`).
 - Many keys accept **fallback aliases** (legacy names such as `MAX_OPEN_CONNS`, `RATE_LIMITER_MAX`, `DEBUG`). First-set key wins. RapidAPI market data accepts `RAPIDAPI_KEY` (aliases: `RAPIDAPI_IDX_KEY`, `RAPIDAPI_QUOTE_KEY`).
 - `GOOSE_TABLE=custom.goose_migrations` — non-default goose table location; create the `custom` schema before the first `goose up`.
-- Valkey/Redis caching, SMTP email, Asynq queue, S3/MinIO, GitHub OAuth, OpenRouter and market-data are **optional** — leave their keys empty to disable (app runs fail-open).
+- Valkey/Redis caching, SMTP email, S3/MinIO, GitHub OAuth, OpenRouter and market-data are **optional** — leave their keys empty to disable (app runs fail-open).
 
 ## Testing
 

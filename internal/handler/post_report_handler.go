@@ -44,8 +44,8 @@ func (h *PostReportHandler) ReportPost(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	if err := h.reportService.ReportPost(c.Context(), c.Params("id"), userID, req); err != nil {
@@ -86,8 +86,8 @@ func (h *PostReportHandler) ModeratePost(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	if err := h.reportService.ModeratePost(c.Context(), c.Params("id"), adminID, req); err != nil {

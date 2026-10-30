@@ -33,6 +33,10 @@ func (h *HoldingHandler) respondHoldingError(c fiber.Ctx, message string, err er
 		return response.BadRequest(c, message, err)
 	case errors.Is(err, apperrors.ErrHoldingInvalidRange):
 		return response.BadRequest(c, message, err)
+	case errors.Is(err, apperrors.ErrHoldingRangeTooLarge):
+		return response.BadRequest(c, message, err)
+	case errors.Is(err, apperrors.ErrHoldingInvalidDecimal):
+		return response.BadRequest(c, message, err)
 	default:
 		return response.InternalServerError(c, message, err)
 	}
@@ -110,8 +114,8 @@ func (h *HoldingHandler) CreateHolding(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	holding, err := h.holdingService.CreateHolding(c.Context(), userID, &req)
@@ -293,10 +297,16 @@ func (h *HoldingHandler) GetMonthlyData(c fiber.Ctx) error {
 	return response.Success(c, "Holdings monthly data fetched successfully", result)
 }
 
+// minHoldingYear/maxHoldingYearAhead bound the year query params so a caller
+// can't force the service's month-by-month loop (holding_service.go) to walk
+// millions of iterations with a value like startYear=2147483647.
+const minHoldingYear = 1990
+
 func parseMonthlyQuery(c fiber.Ctx) (*dto.HoldingMonthlyQuery, error) {
 	now := time.Now()
 	startMonth, startYear := int(now.Month()), now.Year()
 	endMonth, endYear := int(now.Month()), now.Year()
+	maxHoldingYear := now.Year() + 1
 
 	var hasStartMonth, hasStartYear, hasEndMonth, hasEndYear bool
 
@@ -307,10 +317,12 @@ func parseMonthlyQuery(c fiber.Ctx) (*dto.HoldingMonthlyQuery, error) {
 		}
 	}
 	if sy := c.Query("startYear"); sy != "" {
-		if v, err := strconv.Atoi(sy); err == nil {
-			startYear = v
-			hasStartYear = true
+		v, err := strconv.Atoi(sy)
+		if err != nil || v < minHoldingYear || v > maxHoldingYear {
+			return nil, apperrors.ErrHoldingInvalidRange
 		}
+		startYear = v
+		hasStartYear = true
 	}
 	if em := c.Query("endMonth"); em != "" {
 		if v, err := strconv.Atoi(em); err == nil && v >= 1 && v <= 12 {
@@ -319,10 +331,12 @@ func parseMonthlyQuery(c fiber.Ctx) (*dto.HoldingMonthlyQuery, error) {
 		}
 	}
 	if ey := c.Query("endYear"); ey != "" {
-		if v, err := strconv.Atoi(ey); err == nil {
-			endYear = v
-			hasEndYear = true
+		v, err := strconv.Atoi(ey)
+		if err != nil || v < minHoldingYear || v > maxHoldingYear {
+			return nil, apperrors.ErrHoldingInvalidRange
 		}
+		endYear = v
+		hasEndYear = true
 	}
 
 	// Fill missing start components with current date.
@@ -388,8 +402,8 @@ func (h *HoldingHandler) DuplicateHoldings(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request format", err)
 	}
 
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	results, err := h.holdingService.DuplicateHoldings(c.Context(), userID, &req)

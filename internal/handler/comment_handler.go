@@ -4,6 +4,7 @@ import (
 	"fiberbackend/internal/dto"
 	"fiberbackend/internal/service"
 	"fiberbackend/pkg/response"
+	"fiberbackend/pkg/validator"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,8 +32,8 @@ func (h *CommentHandler) CreateComment(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
-	if err := bindValidate(c, &commentDTO); err != nil {
-		return err
+	if err := validate.Validate(&commentDTO); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)
@@ -63,9 +64,13 @@ func (h *CommentHandler) GetCommentsByPostID(c fiber.Ctx) error {
 }
 
 func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
+	postID := c.Params("id")
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
+	}
 	commentID := c.Params("comment_id")
-	if commentID == "" {
-		return response.BadRequest(c, "Comment ID is required", nil)
+	if !validator.IsValidUUID(commentID) {
+		return response.BadRequest(c, "Invalid comment ID", nil)
 	}
 
 	var commentDTO dto.CreateCommentRequest
@@ -73,8 +78,8 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
 
-	if err := bindValidate(c, &commentDTO); err != nil {
-		return err
+	if err := validate.Validate(&commentDTO); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)
@@ -82,7 +87,7 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	comment, err := h.commentService.UpdateComment(c.Context(), commentID, commentDTO.Text, userID)
+	comment, err := h.commentService.UpdateComment(c.Context(), postID, commentID, commentDTO.Text, userID)
 	if err != nil {
 		return respondError(c, "Failed to update comment", err)
 	}
@@ -91,9 +96,13 @@ func (h *CommentHandler) UpdateComment(c fiber.Ctx) error {
 }
 
 func (h *CommentHandler) DeleteComment(c fiber.Ctx) error {
+	postID := c.Params("id")
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
+	}
 	commentID := c.Params("comment_id")
-	if commentID == "" {
-		return response.BadRequest(c, "Comment ID is required", nil)
+	if !validator.IsValidUUID(commentID) {
+		return response.BadRequest(c, "Invalid comment ID", nil)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)
@@ -104,7 +113,7 @@ func (h *CommentHandler) DeleteComment(c fiber.Ctx) error {
 	// Super admins may delete any comment for moderation purposes.
 	isAdmin := isSuperAdmin(c.Context(), h.userService, userID)
 
-	if err := h.commentService.DeleteComment(c.Context(), commentID, userID, isAdmin); err != nil {
+	if err := h.commentService.DeleteComment(c.Context(), postID, commentID, userID, isAdmin); err != nil {
 		return respondError(c, "Failed to delete comment", err)
 	}
 

@@ -25,8 +25,8 @@ func (h *TagHandler) CreateTag(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	tag, err := h.service.CreateTag(c.Context(), &req)
@@ -99,8 +99,8 @@ func (h *TagHandler) UpdateTag(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return response.BadRequest(c, "Invalid request payload", err)
 	}
-	if err := bindValidate(c, &req); err != nil {
-		return err
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
 	}
 
 	tag, err := h.service.UpdateTag(c.Context(), uint(id), &req)
@@ -108,7 +108,7 @@ func (h *TagHandler) UpdateTag(c fiber.Ctx) error {
 		if errors.Is(err, apperrors.ErrTagNameRequired) {
 			return response.BadRequest(c, err.Error(), nil)
 		}
-		if errors.Is(err, apperrors.ErrTagNotFound) {
+		if errors.Is(err, apperrors.ErrTagNotFound) || errors.Is(err, apperrors.ErrInvalidTagID) {
 			return response.NotFound(c, "Tag not found", err)
 		}
 		return response.InternalServerError(c, "Failed to update tag", err)
@@ -124,7 +124,7 @@ func (h *TagHandler) DeleteTag(c fiber.Ctx) error {
 	}
 
 	if err := h.service.DeleteTag(c.Context(), uint(id)); err != nil {
-		if errors.Is(err, apperrors.ErrTagNotFound) {
+		if errors.Is(err, apperrors.ErrTagNotFound) || errors.Is(err, apperrors.ErrInvalidTagID) {
 			return response.NotFound(c, "Tag not found", err)
 		}
 		return response.InternalServerError(c, "Failed to delete tag", err)
