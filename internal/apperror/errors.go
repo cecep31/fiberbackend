@@ -51,6 +51,13 @@ var (
 	// SSE `error` event shows a generic message, never the underlying DB error.
 	ErrChatAIResponseSaveFailed = errors.New("failed to save AI response")
 
+	// ErrAIArticleGenerationUnavailable means no OpenRouter client, API key or
+	// default model is configured; the handler answers 503.
+	ErrAIArticleGenerationUnavailable = errors.New("AI article generation is not available")
+	// ErrAIEmptyResponse means the upstream stream ended without any content.
+	// Its text is sent verbatim as the SSE `error` data.
+	ErrAIEmptyResponse = errors.New("OpenRouter returned an empty response")
+
 	ErrInvalidPaginationLimit   = errors.New("limit must be greater than 0")
 	ErrPaginationLimitExceeded  = errors.New("limit must not exceed 100")
 	ErrPaginationOffsetNegative = errors.New("offset must be non-negative")

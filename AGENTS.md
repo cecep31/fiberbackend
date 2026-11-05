@@ -52,6 +52,7 @@ go mod download && go mod tidy && go mod verify
 - **Health**: `GET /health` — pings DB (200/503). Used by Docker HEALTHCHECK and load balancers.
 - **Pagination**: Use `handler.ParsePaginationParams(c, defaultLimit)` — returns `(limit, offset)`, max cap 100. Build meta with `response.CalculatePaginationMeta(total, offset, limit)` and pass via `response.SuccessWithMeta`.
 - **Streaming (chat)**: SSE via `c.RequestCtx().SetBodyStreamWriter(...)` — see `internal/handler/chat_conversation_handler.go` and `guild_channel_handler.go`.
+- **AI article generation**: `POST /api/ai/generate-article` (`AIHandler` → `ArticleGenerationService`, no repository) streams an OpenRouter draft with the same SSE frames as chat via the shared generic `streamAIEvents` (no initial event; `ai_complete` carries `dto.GeneratedArticle`). It always uses `OPENROUTER_DEFAULT_MODEL` at temperature 0.7 and answers 503 (`response.ServiceUnavailable`) when AI is not configured.
 
 ## Config & Env
 
@@ -86,6 +87,7 @@ response.Conflict(c, "msg", conflictErr)      // 409
 response.InternalServerError(c, "msg", err)  // 500 — err logged server-side only, never sent to client
 response.FromValidateError(c, err)            // 422 with structured field errors
 response.TooManyRequests(c, "msg")           // 429 (rate limit)
+response.ServiceUnavailable(c, "msg")        // 503 with a custom message (HTTPStatus drops the message above 500)
 ```
 
 Validation failures map to **422** with a structured `errors` array (`response.FromValidateError`). `response.Conflict` takes a string reason, not an `error`.

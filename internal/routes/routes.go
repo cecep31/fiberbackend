@@ -33,6 +33,7 @@ type Routes struct {
 	postStatsHandler        *handler.PostStatsHandler
 	tagStatsHandler         *handler.TagStatsHandler
 	userStatsHandler        *handler.UserStatsHandler
+	aiHandler               *handler.AIHandler
 }
 
 func NewRoutes(
@@ -59,6 +60,7 @@ func NewRoutes(
 	postStatsHandler *handler.PostStatsHandler,
 	tagStatsHandler *handler.TagStatsHandler,
 	userStatsHandler *handler.UserStatsHandler,
+	aiHandler *handler.AIHandler,
 ) *Routes {
 	return &Routes{
 		config:                  config,
@@ -84,6 +86,7 @@ func NewRoutes(
 		postStatsHandler:        postStatsHandler,
 		tagStatsHandler:         tagStatsHandler,
 		userStatsHandler:        userStatsHandler,
+		aiHandler:               aiHandler,
 	}
 }
 
@@ -104,6 +107,7 @@ func (r *Routes) setupAPIRoutes(api fiber.Router) {
 	r.setupBookmarkRoutes(api)
 	r.setupNotificationRoutes(api)
 	r.setupGuildRoutes(api)
+	r.setupAIRoutes(api)
 }
 
 func (r *Routes) setupChatConversationRoutes(api fiber.Router) {

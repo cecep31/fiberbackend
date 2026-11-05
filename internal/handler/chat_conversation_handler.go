@@ -308,11 +308,20 @@ const chatStreamWriteTimeout = 10 * time.Second
 
 // streamChatEvents writes the AI chat SSE stream: the initial event, every
 // `ai_chunk`, then exactly one of `ai_complete` or `error`, and always a final
-// `data: [DONE]`. cancel is the service ctx's CancelFunc; the writer calls it
-// whenever it ends, so a client disconnect (a failed write or flush) aborts
-// the OpenRouter request, lets the producer goroutines exit and skips saving a
-// partial reply. The fiber ctx must not be used inside the writer.
+// `data: [DONE]`. See streamAIEvents.
 func streamChatEvents(c fiber.Ctx, cancel context.CancelFunc, initialEvent map[string]any, chunks <-chan string, complete <-chan dto.ChatMessageResponse, errCh <-chan error) error {
+	return streamAIEvents(c, cancel, initialEvent, chunks, complete, errCh, "chat stream failed")
+}
+
+// streamAIEvents writes an AI SSE stream (chat and article generation share
+// the frame format): the optional initial event, every `ai_chunk`, then
+// exactly one of `ai_complete` (data: the complete value) or `error`, and
+// always a final `data: [DONE]`. cancel is the service ctx's CancelFunc; the
+// writer calls it whenever it ends, so a client disconnect (a failed write or
+// flush) aborts the OpenRouter request, lets the producer goroutines exit and
+// skips saving a partial reply. The fiber ctx must not be used inside the
+// writer.
+func streamAIEvents[T any](c fiber.Ctx, cancel context.CancelFunc, initialEvent map[string]any, chunks <-chan string, complete <-chan T, errCh <-chan error, failureLog string) error {
 	c.Set(fiber.HeaderContentType, "text/event-stream")
 	c.Set(fiber.HeaderCacheControl, "no-cache")
 	c.Set("Connection", "keep-alive")
@@ -349,7 +358,7 @@ func streamChatEvents(c fiber.Ctx, cancel context.CancelFunc, initialEvent map[s
 		}
 
 		if err, ok := <-errCh; ok && err != nil {
-			chatLog.Error("chat stream failed", "error", err)
+			chatLog.Error(failureLog, "error", err)
 			if err := writeSSE(write, map[string]any{
 				"type": "error",
 				"data": streamErrorMessage(err),

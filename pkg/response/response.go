@@ -116,6 +116,21 @@ func TooManyRequests(c fiber.Ctx, message string) error {
 	})
 }
 
+// ServiceUnavailable sends a 503 response with a custom message, for a
+// feature whose optional backing service is not configured. (HTTPStatus
+// always replaces the message with the status text for codes above 500.)
+func ServiceUnavailable(c fiber.Ctx, message string) error {
+	log.Warn("service unavailable",
+		"message", message,
+	)
+
+	return c.Status(http.StatusServiceUnavailable).JSON(APIResponse{
+		Success: false,
+		Message: message,
+		Error:   http.StatusText(http.StatusServiceUnavailable),
+	})
+}
+
 // NotFound sends a not found error response
 func NotFound(c fiber.Ctx, message string, err error) error {
 	errorMsg := "Resource not found"

@@ -133,6 +133,19 @@ func TestForbidden(t *testing.T) {
 	}
 }
 
+func TestServiceUnavailable(t *testing.T) {
+	code, raw := runWith(t, func(c fiber.Ctx) error {
+		return ServiceUnavailable(c, "feature off")
+	})
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", code, http.StatusServiceUnavailable)
+	}
+	body := decode(t, raw)
+	if body.Success || body.Message != "feature off" || body.Error != "Service Unavailable" {
+		t.Errorf("body = %+v", body)
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	code, raw := runWith(t, func(c fiber.Ctx) error {
 		return NotFound(c, "missing", errors.New("post not found"))

@@ -56,6 +56,7 @@ Most handlers use the `pkg/response` envelope:
 | Conflict | 409 | Duplicate resource |
 | Validation | 422 | `errors` contains field errors (`field`, `message`, `value`, `tag`) |
 | Server error | 500 | Generic client message; details are logged server-side only |
+| Service unavailable | 503 | Optional feature not configured; `error`: `"Service Unavailable"` |
 
 ### Pagination (`meta`)
 
@@ -87,6 +88,7 @@ Query: `limit` (default varies by endpoint, **maximum 100** on most endpoints â€
   `forgot-password` **3 / 5 minutes**;
   `refresh` **30 / minute**;
   `oauth/exchange` **10 / minute**.
+  Other per-route fixed windows: `POST /api/posts` and post reports **10 / hour**, `POST /api/ai/generate-article` **20 / hour**.
 
 ## Health & Root
 
@@ -104,6 +106,7 @@ Query: `limit` (default varies by endpoint, **maximum 100** on most endpoints â€
 | Posts (comments, views, likes) | `/api/posts` | [posts.md](./posts.md) |
 | Tags | `/api/tags` | [tags.md](./tags.md) |
 | Chat | `/api/chat/conversations`, `/api/chat/messages` | [chat.md](./chat.md) |
+| AI (article generation, SSE) | `/api/ai` | [ai.md](./ai.md) |
 | Holdings | `/api/holdings`, `/api/holding-types` | [holdings.md](./holdings.md) |
 | Exchange rates | `/api/exchange-rates` | [exchange-rates.md](./exchange-rates.md) |
 | Bookmarks | `/api/bookmarks` | [bookmarks.md](./bookmarks.md) |

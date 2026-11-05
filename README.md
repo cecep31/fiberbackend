@@ -10,6 +10,7 @@ A modern, robust REST API built with Go 1.26, **Fiber v3**, GORM, and PostgreSQL
 - **Moderation**: post reports, admin hide/unhide, comment spam guard.
 - **Analytics**: Post/tag/user stats + engagement, likes-by-month, admin reports (overview/user/post/engagement), holdings dashboards.
 - **Real-time Chat**: Conversational AI via OpenRouter with SSE streaming and message history.
+- **AI Article Drafts**: `POST /api/ai/generate-article` streams an HTML draft article (OpenRouter, SSE) for the post editor; stateless and rate limited.
 - **Finance Tools**: Holdings with live price sync (Yahoo via RapidAPI), monthly compare/trends, IDX corporate-action calendar, exchange rates.
 - **Security**: JWT auth (DB-checked admin), per-endpoint rate limiting, input validation (422), helmet security headers, no error leakage, anti-spam guards.
 - **Performance**: Valkey/Redis caching, connection pooling, GORM slow-query logging.
@@ -74,7 +75,7 @@ Modular layered architecture with manual dependency injection:
 
 ## API Documentation
 
-Full HTTP API reference lives in [`docs/api/README.md`](docs/api/README.md), with per-module docs for auth, users, posts (incl. moderation), tags, chat, guilds, holdings, exchange rates, bookmarks, notifications, and admin stats.
+Full HTTP API reference lives in [`docs/api/README.md`](docs/api/README.md), with per-module docs for auth, users, posts (incl. moderation), tags, chat, AI article generation, guilds, holdings, exchange rates, bookmarks, notifications, and admin stats.
 
 ### Standardized Responses
 

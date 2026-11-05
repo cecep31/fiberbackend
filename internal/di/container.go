@@ -98,6 +98,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	postLikeService := service.NewPostLikeService(postLikeRepo, postRepo)
 	userFollowService := service.NewUserFollowService(userFollowRepo, userRepo, notificationService)
 	chatConversationService := service.NewChatConversationService(chatConversationRepo, openRouterClient, cfg)
+	articleGenerationService := service.NewArticleGenerationService(openRouterClient, cfg)
 	rawQuoteClient := market.NewRapidAPIQuoteClient(cfg.MarketData.RapidAPIKey, nil)
 	quoteClient := market.NewCachedQuoteClient(rawQuoteClient, redisCache)
 	holdingService := service.NewHoldingService(holdingRepo, quoteClient, redisCache)
@@ -123,6 +124,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 	postLikeHandler := handler.NewPostLikeHandler(postLikeService)
 	userFollowHandler := handler.NewUserFollowHandler(userFollowService)
 	chatConversationHandler := handler.NewChatConversationHandler(chatConversationService)
+	aiHandler := handler.NewAIHandler(articleGenerationService)
 	holdingHandler := handler.NewHoldingHandler(holdingService)
 	exchangeRateHandler := handler.NewExchangeRateHandler(exchangeRateService)
 	bookmarkHandler := handler.NewBookmarkHandler(bookmarkService)
@@ -160,6 +162,7 @@ func NewContainer(cfg *config.Config) (*Container, error) {
 		postStatsHandler,
 		tagStatsHandler,
 		userStatsHandler,
+		aiHandler,
 	)
 
 	return &Container{

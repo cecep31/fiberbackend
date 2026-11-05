@@ -92,4 +92,5 @@ The `README.md` references a `Makefile` with commands like `make build`, `make d
  *   **Posts:** `/api/posts/*` (CRUD, Comments, Likes, Views, Tag filtering)
  *   **Users:** `/api/users/*` (Profile, Following)
  *   **Chat:** `/api/chat/conversations/*` (Conversational AI management)
+ *   **AI:** `/api/ai/generate-article` (SSE-streamed AI draft article for the post editor; no DB access)
  *   **Holdings:** `/api/holdings/*` (Asset tracking)
