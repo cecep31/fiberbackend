@@ -19,8 +19,8 @@ func NewUserStatsHandler(statsService service.UserStatsService) *UserStatsHandle
 func (h *UserStatsHandler) GetStats(c fiber.Ctx) error {
 	limit, _ := ParsePaginationParams(c, 10)
 	stats, err := h.statsService.GetUserStats(c.Context(), dto.DateRangeQuery{
-		StartDate: c.Query("startDate"),
-		EndDate:   c.Query("endDate"),
+		StartDate: parseStatsDate(c.Query("startDate")),
+		EndDate:   parseStatsDate(c.Query("endDate")),
 	}, limit)
 	if err != nil {
 		return response.InternalServerError(c, "Failed to fetch user stats", err)

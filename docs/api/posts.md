@@ -84,13 +84,20 @@ Post CRUD, image uploads, feeds, comments, views, and likes. Sub-resources use `
 | `search` | Search text |
 | `sort_by` | `id`, `title`, `created_at`, `updated_at`, `view_count`, `like_count`, `bookmark_count` |
 | `sort_order` | `asc` / `desc` (default `desc`) |
-| `start_date`, `end_date` | Date filters |
-| `created_by` | Author UUID |
+| `start_date`, `end_date` | Created-at bounds (inclusive): `YYYY-MM-DD` (UTC midnight; month/day may be unpadded), RFC 3339 (separator `T`, `t` or a space), or zone-less `YYYY-MM-DDTHH:MM:SS` / `YYYY-MM-DD HH:MM:SS` (UTC) |
+| `created_by` | Author UUID (trimmed) |
 | `published` | `true` / `false` |
 | `tags` | Comma-separated list |
 | `limit`, `offset` | Pagination (default limit 10) |
 
 **Success - 200** - `data`: `PostResponse[]`, `meta`: pagination.
+
+**Errors**
+
+| Status | Message |
+|--------|---------|
+| 400 | `Invalid start_date format, expected YYYY-MM-DD or an RFC 3339 timestamp` (same for `end_date`) |
+| 400 | `Invalid created_by value, expected UUID` |
 
 ### GET `/api/posts/random`
 
@@ -290,7 +297,7 @@ Both `:id` and `:comment_id` must be UUIDs (400 `Invalid post ID` / `Invalid com
 
 ### POST `/api/posts/:id/view`
 
-Record a view for the logged-in user.
+Record a view for the logged-in user. `:id` must be a UUID (400 `Invalid post ID`); a missing or hidden post returns 404.
 
 ### GET `/api/posts/:id/view-stats`
 
@@ -315,6 +322,8 @@ Record a view for the logged-in user.
 **Success - 200** - `data`: `{ "has_viewed": true }`.
 
 ### GET `/api/posts/:id/views`
+
+`:id` must be a UUID (400 `Invalid post ID`). Only the post's author or a super admin may list views (403 otherwise).
 
 List views (internal model: `id`, `post_id`, `user_id`, `ip_address`, `user_agent`, timestamps) + pagination `meta`.
 

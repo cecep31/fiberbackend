@@ -54,10 +54,23 @@ func (h *PostHandler) GetPosts(c fiber.Ctx) error {
 		Search:    c.Query("search"),
 		SortBy:    c.Query("sort_by"),
 		SortOrder: c.Query("sort_order"),
-		StartDate: c.Query("start_date"),
-		EndDate:   c.Query("end_date"),
-		CreatedBy: c.Query("created_by"),
 	}
+
+	startDate, ok := parseFilterDate(c.Query("start_date"))
+	if !ok {
+		return response.BadRequest(c, "Invalid start_date format, expected YYYY-MM-DD or an RFC 3339 timestamp", nil)
+	}
+	endDate, ok := parseFilterDate(c.Query("end_date"))
+	if !ok {
+		return response.BadRequest(c, "Invalid end_date format, expected YYYY-MM-DD or an RFC 3339 timestamp", nil)
+	}
+	createdBy := strings.TrimSpace(c.Query("created_by"))
+	if createdBy != "" && !validator.IsValidUUID(createdBy) {
+		return response.BadRequest(c, "Invalid created_by value, expected UUID", nil)
+	}
+	filter.StartDate = startDate
+	filter.EndDate = endDate
+	filter.CreatedBy = createdBy
 
 	if limit := c.Query("limit"); limit != "" {
 		if limitInt, err := strconv.Atoi(limit); err == nil && limitInt > 0 {

@@ -19,8 +19,8 @@ func NewPostViewHandler(postViewService service.PostViewService, userService ser
 
 func (h *PostViewHandler) RecordView(c fiber.Ctx) error {
 	postID := c.Params("id")
-	if postID == "" {
-		return response.BadRequest(c, "Post ID is required", nil)
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
 	}
 
 	var userID string
@@ -41,8 +41,8 @@ func (h *PostViewHandler) RecordView(c fiber.Ctx) error {
 
 func (h *PostViewHandler) GetPostViews(c fiber.Ctx) error {
 	postID := c.Params("id")
-	if postID == "" {
-		return response.BadRequest(c, "Post ID is required", nil)
+	if !validator.IsValidUUID(postID) {
+		return response.BadRequest(c, "Invalid post ID", nil)
 	}
 
 	userID, ok := GetUserIDFromClaims(c)

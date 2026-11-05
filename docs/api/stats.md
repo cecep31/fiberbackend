@@ -15,7 +15,7 @@ Admin statistics endpoints that replaced the legacy `/api/reports` module. **All
 
 ## Query Parameters
 
-Optional date filters use `startDate` and `endDate` in **`YYYY-MM-DD`** format.
+Optional date filters use `startDate` and `endDate` in **`YYYY-MM-DD`** format (month and day may be unpadded, e.g. `2024-1-2`). On every stats endpoint an unparsable value is ignored (treated as absent), not rejected.
 
 | Endpoint | Params |
 |----------|--------|
