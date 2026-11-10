@@ -365,13 +365,50 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 	})
 }
 
-func (h *AuthHandler) DeleteAccount(c fiber.Ctx) error {
+// RequestAccountDeletion emails the current user a link to confirm deleting
+// their account. The account is not deleted yet.
+func (h *AuthHandler) RequestAccountDeletion(c fiber.Ctx) error {
 	userID, ok := GetUserIDFromClaims(c)
 	if !ok {
 		return response.Unauthorized(c, "User not authenticated")
 	}
 
-	if err := h.authService.DeleteAccount(c.Context(), userID); err != nil {
+	err := h.authService.RequestAccountDeletion(c.Context(), userID, c.IP(), c.Get(fiber.HeaderUserAgent))
+	if errors.Is(err, apperrors.ErrEmailNotConfigured) {
+		return response.ServiceUnavailable(c, "Email delivery is not available, account deletion cannot be confirmed")
+	}
+	if errors.Is(err, apperrors.ErrUserNotFound) {
+		return response.NotFound(c, "User not found", err)
+	}
+	if err != nil {
+		return response.InternalServerError(c, "Failed to send account deletion email", err)
+	}
+
+	return response.Success(c, "A confirmation link has been sent to your email", nil)
+}
+
+// ConfirmAccountDeletion deletes the account that owns the emailed token.
+func (h *AuthHandler) ConfirmAccountDeletion(c fiber.Ctx) error {
+	var req dto.ConfirmAccountDeletionRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return response.BadRequest(c, "Invalid request format", err)
+	}
+
+	if err := validate.Validate(&req); err != nil {
+		return response.FromValidateError(c, err)
+	}
+
+	err := h.authService.ConfirmAccountDeletion(c.Context(), req.Token, c.IP(), c.Get(fiber.HeaderUserAgent))
+	if errors.Is(err, apperrors.ErrInvalidToken) {
+		return response.BadRequest(c, "Invalid deletion link", err)
+	}
+	if errors.Is(err, apperrors.ErrAccountDeletionTokenUsed) {
+		return response.BadRequest(c, "Deletion link has already been used", err)
+	}
+	if errors.Is(err, apperrors.ErrAccountDeletionTokenExpired) {
+		return response.BadRequest(c, "Deletion link has expired", err)
+	}
+	if err != nil {
 		return response.InternalServerError(c, "Failed to delete account", err)
 	}
 

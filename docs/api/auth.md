@@ -15,6 +15,8 @@ Public auth endpoints use a fixed-window rate limit per IP. If `VALKEY_URL` is e
 | POST | `/refresh` | No | 30 / minute |
 | POST | `/logout` | Bearer | Global |
 | GET | `/profile` | Bearer | Global |
+| POST | `/account/delete-request` | Bearer | 3 / 5 minutes |
+| POST | `/account/delete-confirm` | No | 5 / 5 minutes |
 | PATCH | `/password` | Bearer | Global |
 | GET | `/activity-logs` | Bearer | Global |
 | GET | `/activity-logs/recent` | Bearer | Global |
@@ -248,6 +250,55 @@ Get the currently logged-in user's profile. Returns a flat subset of user fields
 | 401 | Missing or invalid token |
 | 404 | `User not found`: the token's user was deleted or soft-deleted |
 | 500 | Server error (`Failed to get profile`) |
+
+---
+
+## POST `/api/auth/account/delete-request`
+
+Step 1 of deleting the current user's account. Nothing is deleted yet: a one-time link is emailed to the user, built from `FRONTEND_DELETE_ACCOUNT_URL` with a `token` query parameter. The link works for 30 minutes and only once; a new request replaces any earlier link.
+
+**Success - 200**
+
+```json
+{
+  "success": true,
+  "message": "A confirmation link has been sent to your email"
+}
+```
+
+**Errors**
+
+| HTTP | Condition |
+|------|-----------|
+| 401 | Not logged in |
+| 503 | SMTP is not configured, so the deletion could never be confirmed |
+
+---
+
+## POST `/api/auth/account/delete-confirm`
+
+Step 2. Soft-deletes the account that owns the token (sets `deleted_at`) and revokes all refresh tokens. No bearer token needed, so the link can be opened on any device. Access tokens stay valid until they expire, so a signed-in frontend should clear local tokens.
+
+**Body**
+
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| `token` | string | Yes | max 255 |
+
+**Success - 200**
+
+```json
+{
+  "success": true,
+  "message": "Account deleted successfully"
+}
+```
+
+**Errors**
+
+| HTTP | Condition |
+|------|-----------|
+| 400 | Invalid / expired / already-used link |
 
 ---
 

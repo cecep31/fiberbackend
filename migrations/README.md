@@ -52,4 +52,4 @@ goose create nama_migration sql
 - Foreign key constraints with `ON DELETE CASCADE` ensure data integrity
 - Database triggers automatically maintain count fields (view_count, like_count, bookmark_count, followers_count, following_count)
 - Soft deletes are supported via `deleted_at` timestamps
-- UUID primary keys use `uuidv7()` by default (PostgreSQL 18+)
+- UUID primary keys use `uuidv7()` by default (PostgreSQL 18+)- `account_deletion_tokens` (20261109120000): one-time tokens emailed by `POST /api/auth/account/delete-request`; `POST /api/auth/account/delete-confirm` spends one and soft-deletes the user. Only the SHA-256 hash is stored (unique index), tokens live 30 minutes, and `MarkUsed` is a conditional `UPDATE ... WHERE used_at IS NULL` so a link cannot be used twice. Rows cascade with their user
